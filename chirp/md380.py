@@ -19,12 +19,19 @@
 # the TYT MD-380 by Travis Goodspeed, KK4VCZ.  To use this plugin,
 # copy or symlink it into the drivers/ directory of Chirp.
 #
-# You probably want to read your radio's image with 'md380-dfu read
+# You probably want to read your radio's image with 'md380_dfu.py read
 # radio.img' and then open it as a file with chirpw.
 
 
 from chirp import chirp_common, directory, memmap
 from chirp import bitwise, errors
+try:
+    from chirp.dmr import *
+except:
+    print("Current Chirp does not have DMR support.")
+    #this will fail to import anyway, due to references to things in chirp.dmr
+
+
 from chirp.settings import RadioSetting, RadioSettingGroup, \
     RadioSettingValueInteger, RadioSettingValueList, \
     RadioSettingValueBoolean, RadioSettingValueString, \
@@ -32,6 +39,14 @@ from chirp.settings import RadioSetting, RadioSettingGroup, \
 
 import logging
 LOG = logging.getLogger(__name__)
+import tempfile
+import os
+try:
+    from md380tools.md380_dfu import *
+except:
+    #this will fail to import anyway, due to references to things in md380tools
+    print("md380tools not available for import, will not be able to read and write to radio directly")
+
 
 # Someday I'll figure out Chinese encoding, but for now we'll stick to ASCII.
 CHARSET = ["%i" % int(x) for x in range(0, 10)] + \
@@ -41,8 +56,26 @@ CHARSET = ["%i" % int(x) for x in range(0, 10)] + \
     list(".,:;*#_-/&()@!?^ +") + list("\x00" * 100)
 DUPLEX = ["", "-", "+", "split"];
 #TODO 'DMR' should be added as a valid mode.
-MODES = ["DIG", "NFM", "FM"];
+MODES = ["DMR", "NFM", "FM"];
 TMODES = ["", "Tone", "TSQL"]
+BUTTON= {
+        "alert_tones_toggle":0x01,
+        "emergency_on":0x02,
+        "emergency_off":0x03,
+        "power_toggle":0x04,
+        "monitor":0x05,
+        "nuisance_delete":0x06,
+        "ota_1":0x07,
+        "ota_2":0x08,
+        "talkaround":0x0d,
+        "scan_toggle":0x0e,
+        "squelch_toggle":0x0d,
+        "privacy_toggle":0x16,
+        "vox_toggle":0x17,
+        "zone_select":0x18,
+        "manual_dial":0x1e,
+        "lone_work_toggle":0x1f,
+        }
 
 # Here is where we define the memory map for the radio. Since
 # We often just know small bits of it, we can use #seekto to skip
@@ -259,39 +292,6 @@ def blankbcd(num):
     num[0].set_bits(0xFF);
     num[1].set_bits(0xFF);
 
-def do_download(radio):
-    """Dummy function that will someday download from the radio."""
-    # NOTE: Remove this in your real implementation!
-    #return memmap.MemoryMap("\x00" * 262144)
-
-    # Get the serial port connection
-    serial = radio.pipe
-
-    # Our fake radio is just a simple download of 262144 bytes
-    # from the serial port. Do that one byte at a time and
-    # store them in the memory map
-    data = ""
-    for _i in range(0, 262144):
-        data = serial.read(1)
-
-    return memmap.MemoryMap(data)
-
-
-def do_upload(radio):
-    """Dummy function that will someday upload to the radio."""
-    # NOTE: Remove this in your real implementation!
-    #raise Exception("This template driver does not really work!")
-
-    # Get the serial port connection
-    serial = radio.pipe
-
-    # Our fake radio is just a simple upload of 262144 bytes
-    # to the serial port. Do that one byte at a time, reading
-    # from our memory map
-    for i in range(0, 262144):
-        serial.write(radio.get_mmap()[i])
-
-
 def utftoasc(utfstring):
     """Converts a UTF16 string to ASCII by dropping the zeroes."""
     toret="";
@@ -299,6 +299,7 @@ def utftoasc(utfstring):
         if c!='\x00':
             toret+=c;
     return toret;
+
 def asctoutf(ascstring,size=None):
     """Converts an ASCII string to UTF16."""
     toret="";
@@ -311,9 +312,67 @@ def asctoutf(ascstring,size=None):
         toret=toret+"\x00";
 
     return toret[:size];
-    
+
+class MD380Contact( DMRContact ):
+    def __init__(self, *args, **kwargs):
+        super( MD380Contact, self).__init__( *args, **kwargs)
+        self.name = utftoasc( str( self.name ))
+        self.name = self.name.strip()
+        if hasattr(self.callid, 'get_value'):
+            self.callid = self.callid.get_value()
+        if hasattr(self.flags, 'get_value'):
+            self.flags = self.flags.get_value()
+
+    def out(self):
+        # shouldn't actually modify self.
+        self.name = asctoutf( self.name.ljust(16) )
+        return super( MD380Contact, self).out()
+
+    def isempty(self):
+        if self.name.strip() == '':
+            return True
+
+        return False
+
+class MD380ContactList( DMRContactList ):
+    def to_csv(self, fh):
+        w = csv.DictWriter( fh, fieldnames=self.fieldnames)
+        for each in self.cl:
+            name = each.name
+            callid = each.callid
+            flags = each.flags
+            if type(callid) == 'instance':
+                callid = int(callid, 16)
+            if type(flags) == 'instance':
+                print("converting!")
+                print(flags)
+                flags = int(flags, 16)
+                print(flags)
+            else:
+                print("not converting")
+            c = {'name':name, 'callid':callid, 'flags':flags}
+            w.writerow( c )
+
+
+class MD380RXGroup( DMRRXGroup ):
+    def __init__(self, *args, **kwargs):
+        super( MD380RXGroup, self).__init__( *args, **kwargs)
+        self.name = utftoasc( str( self.name ))
+        self.name = self.name.strip()
+
+    def out(self):
+        # shouldn't actually modify self.
+        self.name = asctoutf( self.name.ljust(16) )
+        return super( MD380RXGroup, self).out()
+
+    def isempty(self):
+        if self.name.strip() == '':
+            return True
+
+        return False
+
 class MD380Bank(chirp_common.NamedBank):
-    """A VX3 Bank"""
+    """A MD380 Bank"""
     def get_name(self):
         _bank = self._radio._memobj.bank[self.index];
         name = utftoasc(str(_bank.name));
@@ -384,8 +443,8 @@ class MD380BankModel(chirp_common.MTOBankModel):
             if number == 0x0000:
                 continue
             
-            mem=self._radio.get_memory(number);
-            print "Appending memory %i" % number;
+            mem=self._radio.get_memory(number)
+            print("Appending memory %i" % number)
             memories.append(mem)
         return memories
 
@@ -400,14 +459,51 @@ class MD380BankModel(chirp_common.MTOBankModel):
 
 # Uncomment this to actually register this radio in CHIRP
 @directory.register
-class MD380Radio(chirp_common.CloneModeRadio):
+class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio ):
     """MD380 Binary File"""
     VENDOR = "TYT"
     MODEL = "MD-380"
     FILE_EXTENSION = "img"
     BAUD_RATE = 9600    # This is a lie.
+    NO_SERIAL = True
+
+    rxgroup = MD380RXGroup
+    contact = MD380Contact
     
     _memsize=262144;
+
+    # def settings(self, **kwargs):
+        # if "dmrid" in kwargs.items():
+            # k = "dmrid"
+            # v = kwargs[k]
+            # self._memobj.general.dmrid.set_value(v)
+    
+# struct {
+    # u8 unknownff;
+    # bbcd prog_yr[2];
+    # bbcd prog_mon;
+    # bbcd prog_day;
+    # bbcd prog_hour;
+    # bbcd prog_min;
+    # bbcd prog_sec;
+    # u8 unknownver[4];       //Probably version numbers.
+    # u8 unknownff2[52];    //Maybe unused?  All FF.
+    # char line1[20];         //Top line of text at startup.
+    # char line2[20];         //Bottom line of text at startup.
+    # u8 unknownff3[24];      //all FF
+    # u8 flags1; //FE
+    # u8 flags2; //6B for no beeps, 6F will all beeps.
+    # u8 flags3; //EE
+    # u8 flags4; //FF 
+    # ul32 dmrid; //0x2084
+    # u8 flags5[13];  //Unknown settings, seem mostly used.
+    # u8 screenlit; //00 for infinite delay, 01 for 5s, 02 for 10s, 03 for 15s.
+    # u8 unknownff4[2];
+    # u8 unknownzeroes[8];
+    # u8 unknownff5[16];
+    # u32 radioname[32]; //Like all other strings.
+# } general;
+
     @classmethod
     def match_model(cls, filedata, filename):
         return (
@@ -415,6 +511,70 @@ class MD380Radio(chirp_common.CloneModeRadio):
             or len(filedata) == cls._memsize+565
             );
     
+    def __init__(self,*args, **kwargs):
+        super( MD380Radio, self).__init__(*args,**kwargs)
+
+    def fix(self):
+        print("MD380.fix(), do not expect to work.")
+        # super( MD380Radio, self).fix()
+        self.rxgroups = self.rxgrouplist( [ self.rxgroup(x) for x in self._memobj.rxgrouplist ] )
+        self.contacts = self.contactlist( [ self.contact(x) for x in self._memobj.contacts    ] )
+
+    def unfix(self):
+        print("MD380.unfix(), super broken, don't expect to work!")
+        try:
+            self.rxgroups.resolve( self )
+        except Exception as e:
+            print("During rxgroups resolve in unfix()", e)
+            raise(e)
+
+        i=0
+        for i in range(0, len(self.rxgroups)):
+            print(i)
+            try:
+                g = self.rxgroups[i].out()
+                print(g)
+                self._memobj.rxgrouplist[i].name = g['name']
+                self._memobj.rxgrouplist[i].contactidxs = g['contactidxs']
+                i+=1
+            except IndexError as e:
+                print(e)
+        i=0
+        for i in range(0, len(self.contacts)):
+            print(i)
+            try:
+                c = self.contacts[i].out()
+                print(c)
+                self._memobj.contacts[i].name = c['name']
+                self._memobj.contacts[i].callid = c['callid']
+                self._memobj.contacts[i].flags = c['flags']
+                i+=1
+            except IndexError as e:
+                print(e)
+
+
+        # super( MD380Radio, self).unfix()
+        bm = self.get_bank_model()
+        bs = bm.get_mappings()
+        for b in bs:
+            print(b.get_name())
+            ms = bm.get_mapping_memories( b )
+            for m in ms:
+                bm.remove_memory_from_mapping( m, b )
+
+        l,h = self.get_features().memory_bounds
+        for i in xrange(l, h+1):
+            m = self.get_memory(i)
+            b = bs[(i-1)/16]
+            b.set_name( "Z%d"%((i-1)/16) )
+            print("adding mem %d to %s"%(i,b.get_name()))
+            bm.add_memory_to_mapping(m,b)
+
+
+
+            
+
+        print("MD380 unfix")
     
     # Return information about this radio's features, including
     # how many memories it has, what bands it supports, etc
@@ -450,30 +610,37 @@ class MD380Radio(chirp_common.CloneModeRadio):
             self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
         elif(len(self._mmap)==self._memsize+565):
             self._memobj = bitwise.parse(MEM_FORMAT, self._mmap[549:])
-
+        self.fix()
         #self._memobj = bitwise.parse(
         #    MEM_FORMAT, self._mmap)
     
-    # Do a download of the radio from the serial port
     def sync_in(self):
-        pass;
-    
-#         try:
-#             self._mmap = do_download(self)
-#         except errors.RadioError:
-#             raise
-#         except Exception, e:
-#             raise errors.RadioError("Failed to communicate with radio: %s" % e)
-#         #hexdump(self._mmap);
-        
-#         if(len(self._mmap)==self._memsize):
-#             self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
-#         else:
-#             raise errors.RadioError("Incorrect 'Model' selected.")
-    # Do an upload of the radio to the serial port
+        """Download from the radio."""
+        try:
+            tmpfile = tempfile.NamedTemporaryFile(delete=False)
+            dfu = init_dfu()
+            upload_codeplug(dfu, tmpfile.name ) 
+            data = tmpfile.read()
+            tmpfile.close()
+            os.unlink( tmpfile.name )
+            self._mmap = memmap.MemoryMap(data)
+        except errors.RadioError:
+            raise
+        except Exception, e:
+            raise errors.RadioError("Failed to communicate with radio: %s" % e)
+        # if(len(self._mmap)==self._memsize):
+            # self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
+        # else:
+            # raise errors.RadioError("Incorrect 'Model' selected.")
+        self.process_mmap()
+
+    # Do an upload of the radio
     def sync_out(self):
-        #do_upload(self)
-        pass;
+        """Upload to the radio."""
+        self.unfix()
+        data = self.get_mmap()
+        dfu = init_dfu()
+        download_codeplug(dfu, data) 
 
     # Return a raw representation of the memory object, which
     # is very helpful for development
@@ -487,11 +654,12 @@ class MD380Radio(chirp_common.CloneModeRadio):
         _mem = self._memobj.memory[number-1]
         
         # Create a high-level memory object to return to the UI
-        mem = chirp_common.Memory()
+        mem = chirp_common.DMRMemory()
 
         mem.number = number;
         mem.name = utftoasc(str(_mem.name)).rstrip()  # Set the alpha tag
         mem.freq = int(_mem.rxfreq)*10;
+        # print("get_memory freq: %d rxfreq: %d"%( mem.freq, _mem.rxfreq))
         
         ctone=int(_mem.ctone)/10.0;
         rtone=int(_mem.rtone)/10.0;
@@ -544,10 +712,10 @@ class MD380Radio(chirp_common.CloneModeRadio):
         else:
             mem.duplex="split";
         
-        mem.mode="DIG";
+        mem.mode="DMR";
         rmode=_mem.mode&0x0F;
         if rmode==0x02:
-            mem.mode="DIG";
+            mem.mode="DMR";
         elif rmode==0x01:
             mem.mode="NFM";
         elif rmode==0x09:
@@ -556,17 +724,38 @@ class MD380Radio(chirp_common.CloneModeRadio):
             print "WARNING: Mode bytes 0x%02 isn't understood for %s." % (
                 _mem.mode, mem.name);
 
+        if mem.mode == "DMR":
+            slot = _mem.slot
+            print( mem.name, slot )
+            # print(mem.name)
+            # print("\tSlot: ",bin(slot))
+            color = slot >> 4
+            rxonly = slot & 0x2
+            slot = (slot & 12) >> 2
+            print("C,S,rxonly", color, slot, rxonly)
+            mem.timeslot = slot
+            mem.colorcode = color
+        mem.txgroup = _mem.contact
+        mem.rxgroup = _mem.grouplist
+        if mem.name in ["Empty",'']:
+            mem.empty = True
+
         
         return mem
 
     # Store details about a high-level memory to the memory map
     # This is called when a user edits a memory in the UI
     def set_memory(self, mem):
+        try:
+            mem.resolve( self )
+        except AttributeError as e:
+            pass #print("non-dmr memory",e)
         # Get a low-level memory object mapped to the image
         _mem = self._memobj.memory[mem.number-1]
 
         # Convert to low-level frequency representation
         _mem.rxfreq = mem.freq/10;
+        # print("set_memory rxfreq: %d freq: %d"%( _mem.rxfreq, mem.freq))
         
         # Janky offset support.
         # TODO Emulate modes other than split.
@@ -598,13 +787,29 @@ class MD380Radio(chirp_common.CloneModeRadio):
             _mem.mode=0x69;
         elif mem.mode=="NFM":
             _mem.mode=0x61;
-        elif mem.mode=="DIG":
+        elif mem.mode=="DMR":
             _mem.mode=0x62;
         else:
             _mem.mode=0x69;
         
         if _mem.slot==0xff:
             _mem.slot=0x14;  #TODO Make this 0x18 for S2.
+
+        if mem.mode == "DMR":
+            _mem.slot = mem.colorcode << 4 | mem.timeslot << 2 
+            _mem.contact = mem.txgroup
+            _mem.grouplist = mem.rxgroup
+            print("Setting mem %s txgroup to contact idx %s slot= %x"%(str(mem.number), str(mem.txgroup), _mem.slot))
+
+        if mem.empty:
+            _mem.mode = 0xff
+            _mem.slot = 0xff
+            _mem.contact = 0xffff
+            _mem.txfreq = 166666665
+            _mem.rxfreq = 166666665
+            pass #how does radio determine if a channel is empty?
+
+            
 
 
     def get_settings(self):
@@ -628,6 +833,7 @@ class MD380Radio(chirp_common.CloneModeRadio):
                 "line2", "Startup Line 2",
                 RadioSettingValueString(0, 10, utftoasc(str(_general.line2)))));
         return top
+
     def set_settings(self, settings):
         _general = self._memobj.general
         _info = self._memobj.info
