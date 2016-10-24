@@ -16,7 +16,11 @@
 #include "version.h"
 #include "tooldfu.h"
 #include "config.h"
+#include "addl_config.h"
+#include "radio_config.h"
 #include "gfx.h"
+#include "display.h"
+#include "usersdb.h"
 
 GPIO_InitTypeDef  GPIO_InitStructure;
 
@@ -112,49 +116,88 @@ void wstrhex(wchar_t *string, long value){
   }
 }
 
-
-
-
-
-/* Displays a startup demo on the device's screen, including some of
-   the setting information and a picture or two. */
-void demo(){
-#ifdef CONFIG_GRAPHICS
-  drawtext(L"MD380Tools ",
-	   160,20);
-  drawtext(L"by KK4VCZ  ",
-	   160,60);
-  drawtext(L"and Friends",
-	   160,100);
-#ifdef MD380_d13_020
-  drawtext(L"@ d13.020",
-	   160,140);
-#endif  
-#ifdef MD380_d02_032
-  drawtext(L"@ d02.032",
-	   160,140);
-#endif
-#ifdef MD380_s13_020
-  drawtext(L"@ s13.020",
-           160,140);
-#endif
-
-  drawascii(GIT_VERSION,
-            160,180);
-
-  drawtext(VERSIONDATE,
-           160,220);
-  sleep(1000);
-  
-  //Make the welcome image scroll across the screen.
+//Make the welcome image scroll across the screen.
+void demo_show_animation(void) {
   for(int i=0;i<0x60;i+=3){
     gfx_drawbmp(welcomebmp,0,i);
     sleep(30);
   }
+}
+
+void demo_clear(void) {
+  // Clear screen
+  uint32_t oldfg = gfx_get_fg_color();
+  gfx_set_fg_color(0xffffff);
+  gfx_blockfill(0, 0, 160, 128);
+  gfx_set_fg_color(oldfg);
+}
+
+void demo(void) {
+  display_credits();
+  sleep(1000);
+  demo_show_animation();
+  demo_clear();
+}
+
+void boot_splash_set_bottomline_dmrid(void) {
+  // Set the bottom line to the config's dmr id
+  char dmridstr[10] = {0x00};
+  sprintf(dmridstr, "%u\0", (uint32_t)global_addl_config.dmrid);
+  // We need to pad for wchar, someone will probably rip out their eyeballs reading this
+  //mbstowcs(&botlinetext, dmridstr, 10);
+  for (uint8_t ii = 0; ii < 20; ii++) {
+    botlinetext[ii] = 0x00;
+    if (ii%2 == 0) {
+        botlinetext[ii] = dmridstr[ii/2];
+    }
+  }
+}
+
+void boot_splash_set_topline_radioname(void) {
+  for (uint8_t ii = 0 ; ii < 20; ii++) {
+      toplinetext[ii] = global_addl_config.rname[ii];
+  }
+}
+
+void boot_splash_set_bottomline_fullname(void) {
+  char fullname[10] = {0x00};
+  if ( get_dmr_user_field(3, fullname, global_addl_config.dmrid, 10) ) {
+    for (uint8_t ii = 0 ; ii < 20; ii++) {
+      botlinetext[ii] = 0x00;
+      if (ii%2 == 0) {
+          botlinetext[ii] = fullname[ii/2];
+      }
+    }
+  }
+}
+
+void boot_splash(void) {
+  //Restore the bottom line of text before we return.
+  switch (global_addl_config.boot_splash) {
+    case 1:
+      boot_splash_set_topline_radioname();
+      boot_splash_set_bottomline_dmrid();
+      break;
+    case 2:
+      boot_splash_set_topline_radioname();
+      boot_splash_set_bottomline_fullname();
+      break;
+    default:
+      md380_spiflash_read(botlinetext, 0x2054, 20);
+      break;
+  }
+}
+
+
+void splash_hook_handler(void) {
+#ifdef CONFIG_GRAPHICS
+  if (global_addl_config.boot_demo == 0) {
+    demo();
+  }
 #endif //CONFIG_GRAPHICS
 
-  //Restore the bottom line of text before we return.
-  md380_spiflash_read(botlinetext, 0x2054, 20);
+  // Setup dynamic bootscreen
+  boot_splash();
 }
 
 

@@ -2,6 +2,16 @@
 
 by Travis Goodspeed, KK4VCZ
 
+# Support #
+
+To support users by using the md380tools or the resulting patched firmware 
+a Google Group is public opened and reachable via 
+https://groups.google.com/forum/#!forum/md380tools. No extra registration 
+should be necessary. You could also feed it via e-mail at 
+md380tools@googlegroups.com. So feel free to put in your questions into it!
+
+# Introduction #
+
 This repository contains tools for working with codeplugs and firmware
 of the Tytera MD380, which is also sold under a variety of different
 brand names.  The codeplug format is sufficiently similar to the
@@ -16,6 +26,11 @@ Development Tools:
 * `stm32-dfu` modifies firmware for jailbroken devices. (No longer required.)
 * `md380-fw` wraps and unwraps devices firmware.
 * `md380-gfx` modifies firmware graphics.
+
+## Build Status
+
+[![Build Status](https://travis-ci.org/travisgoodspeed/md380tools.svg?branch=master)](https://travis-ci.org/travisgoodspeed/md380tools)
+
 
 ###The md380tools have D13.020 as basic now.###
 
@@ -80,111 +95,44 @@ This project should work across Linux, Mac OS, and Windows, but has
 not been tested on all platforms.  A separate client, MD380Tool,
 is under development for Android.
 
-###Installation of required packages###
-####Debian Stretch:####
+###Preparation of build environment###
 
-    apt-get install gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
-                    libusb-1.0 python-usb make curl
+* [Debian](docs/debian.md)
+* [Ubuntu](docs/ubuntu.md)
+* [Fedora](docs/fedora.md)
+* [SUSE](docs/suse.md)
+* [Raspberry Pi](docs/raspi.md)
+* [Windows](docs/windows.md)
 
-####Debian Jessie (using backports.debian.org):####
+###Additional steps for linux based installations###
 
-Add backports to your sources.list
+```
+git clone https://github.com/travisgoodspeed/md380tools.git
+cd md380tools
+sudo cp 99-md380.rules /etc/udev/rules.d/ 
+```
+(The 99-md380.rules file is copied to /etc/udev/rules.d/ in order to allow users to access the radio over USB without having to use sudo or root permissions.)
 
-    deb http://ftp.debian.org/debian jessie-backports main
+###Flash updated firmware for linux based installations###
 
-to your sources.list (or add a new file with the ".list" extension to /etc/apt/sources.list.d/)
-You can also find a list of other mirrors at https://www.debian.org/mirror/list
-More info at http://backports.debian.org/Instructions/
-
-     apt update
-
-Install python-usb from backports, the rest from Jessie
-
-     apt -t jessie-backports install python-usb
-     apt install gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
-                 libusb-1.0 make curl
-
-####Debian Jessie (using python-pip):####
-
-    apt-get install gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
-            libusb-1.0 git make curl python-pip unzip make curl
-    pip install pyusb -U # update PyUSB to 1.0
-  
-
-####Ubuntu Xenial (16.04.1): ####
-
-    sudo apt-get update
-    sudo apt-get dist-upgrade
-    sudo apt-get install git gcc-arm-none-eabi binutils-arm-none-eabi python-usb libnewlib-arm-none-eabi make curl
-
-Quick recipe for building new firmware:
-
-    git clone https://github.com/travisgoodspeed/md380tools.git
-    cd md380tools
-    sudo cp 99-md380.rules /etc/udev/rules.d/ 
-    make
-
-Quick recipe for uploading the just build firmware:
-
+Turn on radio in DFU mode to begin firmware update with USB cable:
 * insert cable into USB.
 * connect cable to MD380.
-* power-on MD380 while holding PTT button and button above PTT.
+* power-on MD380 by turning volume knob, while holding PTT button and button above PTT.
 
 ```
-./md380-dfu upgrade applet/experiment.bin
+git pull
+make doflash
 ```
+###Flash updated users.csv database for linux based installations###
 
-For reverse engineering:
-
-    sudo apt-get install radare2 radare2-plugins
-
-
-####Raspberry Pi Debian Jessie: #####
+Turn radio normally on to begin database loading with USB cable
 
 ```
-Tested on 2016-05-10-raspbian-jessie by IZ2XBZ
-
-sudo apt-get install gcc-arm-none-eabi binutils-arm-none-eabi libusb-1.0 \
-             libnewlib-arm-none-eabi python-usb make curl
-
-sudo pip install pyusb -U
-
-git clone https://github.com/travisgoodspeed/md380tools.git
-
-cd md380tools
-
-sudo make clean
-
-##### turn on radio in DFU mode to begin firmware update with USB cable ######
-
-sudo make all flash
-
-##### turn radio normally on to begin database loading with USB cable #####
-
-sudo make flashdb
+git pull
+make clean flashdb
 ```
-
-####Windows (using MSYS2):####
-
-Direct USB access has not yet been tested on Windows, and will not work with these instructions. Stay tuned for updates here.
-Manipulating the firmware and compiling the patches is supported, and instructions follow.
-
-Install MSYS2 from https://msys2.github.io, and update it by following the instructions on the homepage.
-Install needed MSYS2 dependencies:
-
-    pacman -S make unzip perl python2
-
-Restart the MSYS2 shell to ensure default paths are updated.
-Download the latest [GNU ARM Embedded Toolchain](https://launchpad.net/gcc-arm-embedded) and unpack to a desired location, ideally without spaces in the path.
-Clone the repo to a desired location.
-In MSYS2, the C drive is located at ```/c/```. Add the ARM toolchain bin directory to the MSYS2 path:
-
-    export PATH=$PATH:/c/path/to/gcc-arm-embedded/bin
-
-If you are interested in using radare2 on Windows, [download it](http://www.radare.org/) and unpack to a desired location. As radare2 does not currently work in the MSYS2 shell, it is suggested to run the commands in the Makefile directly from the CMD shell:
-
-    cd \path\to\md380tools\annotations\2.032
-	\path\to\radare2.exe -a arm -m 0x0800C000 -b 16 -i flash.r flash.img
+(The users.csv file located in the db directory must be refreshed this way otherwise it will continue using any already-existing users.csv file when running "make flashdb" from the main md380tools directory.)
 
 ##Convenient Usage:##
 
@@ -256,11 +204,6 @@ with 16MByte SPI-Flash.**
 After successfully flashing, the radio will be restarted.
 
 ##Flashing on Linux Notes##
-
-* Please ensure the 99-md380.rules file is copied to /etc/udev/rules.d/ in order to allow users to access the radio over USB without having to use sudo or root permissions.
-
-Special note on the users.csv flashdb process:
-* The users.csv file located in the db directory must be manually refreshed by running "make clean" while inside the db directory otherwise it will continue using any already-existing users.csv file when running "make flashdb" from the main md380tools directory. 
 
 To check the type / size of SPI-Flash
 
@@ -348,10 +291,3 @@ as a direct replacement, as seen in the Makefile.
 An image with more than two colors requires the "relocate" argument to
 md380-gfx. There are examples of this in the Makefile as well.
 </strike>
-## Support ##
-
-To support users by using the md380tools or the resulting patched firmware 
-a Google Group is public opened and reachable via 
-https://groups.google.com/forum/#!forum/md380tools. No extra registration 
-should be necessary. You could also feed it via e-mail at 
-md380tools@googlegroups.com. So feel free to put in your questions into it!

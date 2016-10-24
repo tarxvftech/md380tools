@@ -178,7 +178,7 @@ if __name__== '__main__':
     merger.hookstub(0x080974de,   #0x0809661e,    #USB manufacturer string handler function.
                     sapplet.getadr("getmfgstr"));
     merger.hookstub(0x080229ae,  #0x080226d2, #startup_botline
-                    sapplet.getadr("demo"));
+                    sapplet.getadr("splash_hook_handler"));
     merger.hookstub(0x08016b7e,  #0x08016a96,
                     sapplet.getadr("loadfirmwareversion_hook"));
     merger.hookbl(  0x0808f9a6,   #0x0808eb66, #Call to usb_dfu_upload().
@@ -294,6 +294,12 @@ if __name__== '__main__':
     merger.hookbl(0x8047640, sapplet.getadr("f_4225_hook"),0); # 0x0802db42
 
 #    merger.hookstub2(0x0800c72e, sapplet.getadr("create_menu_entry_rev"));
+
+    # keyboard
+    merger.hookbl(0x0804fa12, sapplet.getadr("kb_handler_hook"));
+
+    # Draw/GFX
+    merger.hookbl(0x08021a5e, sapplet.getadr("draw_statusline_hook"));
 
     print "Merging %s into %s at %08x" % (
           sys.argv[2],

@@ -7,38 +7,36 @@
 
 #include <stdint.h>
 
-enum spi_flash_addl_config {
-  offset_rbeep,
-  offset_datef,
-  offset_userscsv,
-  offset_debug,
-  offset_promtg,
-  offset_prompriv,
-  offset_micbargraph,
-  offset_console,
-};
+#define FLASH_OFFSET_DMRID 0x2084
+#define FLASH_OFFSET_RNAME 0x20B0
 
+// Obvious note to newbies... these live in SPI...
+// This means they should never be reordered 
+// or the settings will get tangled up.
 typedef struct addl_config {
-    uint8_t version;
+    uint8_t crc;
+    uint8_t length;
     uint8_t datef;
     uint8_t userscsv;
     uint8_t debug;
     uint8_t promtg;
     uint8_t experimental;
     uint8_t micbargraph;
-    uint8_t console;
+    uint8_t netmon;
     uint8_t rbeep;
-    uint32_t dmrid ;
-    uint8_t reserve[16];
+    uint32_t dmrid;
+    uint8_t boot_demo;
+    uint8_t boot_splash;
+    char rname[32];
 } addl_config_t ;
 
 extern addl_config_t global_addl_config;
 
 extern void init_global_addl_config_hook(void);
 
-extern void spiflash_write_uint8( int offset, uint8_t val );
-extern uint8_t spiflash_read_uint8( int offset );
-extern uint8_t spiflash_read_uint8_ranged( int offset, uint8_t cnt );
+void cfg_fix_dmrid();
+void cfg_fix_radioname();
+void cfg_set_radio_name();
 
 void cfg_save();
 

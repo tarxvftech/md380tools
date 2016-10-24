@@ -13,6 +13,8 @@
 #include "syslog.h"
 #include "console.h"
 
+uint8_t nm_screen = 0 ;
+
 char progress_info[] = { "|/-\\" } ;
 int progress = 0 ;
 
@@ -229,6 +231,12 @@ void netmon2_update()
     print_hdr();
     print_vce();
     
+//    {
+//        extern uint32_t kb_handler_count ;
+//        extern uint32_t f4225_count ; 
+//
+//        con_printf("%d %d\n", kb_handler_count, f4225_count);
+//    }
 }
 
 void netmon3_update()
@@ -242,7 +250,7 @@ void netmon_update()
         return ;
     }
     
-    switch( global_addl_config.console ) {
+    switch( nm_screen ) {
         case 0 :
             return ;
         case 1 :

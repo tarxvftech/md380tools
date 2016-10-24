@@ -43,7 +43,7 @@ extern void f_4315_hook()
 {
     netmon_update();
     con_redraw();
-    if( is_netmon_enabled() ) {
+    if( is_netmon_visible() ) {
         return ;
     }
     F_4315();
@@ -55,7 +55,8 @@ static int new_anti = 1 ;
 
 void * f_4225_internel_hook()
 {
-    if( new_anti || global_addl_config.experimental == 1 ) {
+//    if( new_anti || global_addl_config.experimental == 1 ) {
+    if( new_anti ) {
         return &md380_f_4225_operatingmode;
     }
 
@@ -232,6 +233,8 @@ void trace_scr_mode2()
     }
 }
 
+uint32_t f4225_count = 0;
+    
 void f_4225_hook()
 {
     // this probably runs on other thread than the display task.
@@ -259,16 +262,18 @@ void f_4225_hook()
 //#ifdef CONFIG_GRAPHICS
 
     if ( global_addl_config.micbargraph == 1 ) {
-        if( !is_netmon_enabled() ) {
+        if( !is_netmon_visible() ) {
             draw_micbargraph();
         }
     }
     
     netmon_update();
+
+    f4225_count++ ;
     
     md380_f_4225();
     
-    if( is_console_visible() ) {
+    if( is_netmon_visible() ) {
         if( gui_opmode2 == OPM2_VOICE ) {
             gui_opmode2 = OPM2_IDLE;
         }

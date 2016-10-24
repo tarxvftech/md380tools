@@ -13,6 +13,7 @@ gfx_blockfill        = 0x0801d88d;
 gfx_set_bg_color     = 0x0801d369;
 gfx_set_fg_color     = 0x0801d371;
 
+toplinetext          = 0x2001e3fc;
 botlinetext          = 0x2001e410;
 welcomebmp           = 0x080f8510;
 
@@ -35,7 +36,7 @@ md380_RTC_GetDate    = 0x0802b50d;
 md380_RTC_GetTime    = 0x0802b3f7;
 md380_radio_config   = 0x2001dadc;
 
-
+rc_write_radio_config_to_flash = 0x080226f7 ;
 
 /* Upload and download handlers. */
 usb_upld_handle      = 0x0808f309; /* 232 byte match */
@@ -103,12 +104,12 @@ md380_menu_entry_selected              = 0x2001e903;
 md380_menu_id                          = 0x2001e915; /* */
 md380_program_radio_unprohibited       = 0x2001e574;
 md380_wt_programradio                  = 0x080cff30;
-md380_menu_0x20001114                  = 0x200049fc; /* */
+mn_editbuffer_poi                  = 0x200049fc; /* */
 md380_menu_mem_base                    = 0x2001b274; /* */
 md380_menu_memory                      = 0x2001d5cc; /* */
 md380_menu_edit_buf                    = 0x2001cb9a; /* */
 
-md380_radio_fm_dmr                     = 0x2001deb8;                                                                                                      
+md380_radio_fm_dmr                     = 0x2001deb8;
 
 Create_Menu_Utilies                    = 0x080134a1;
 Create_Menu_Entry_RX_QRG_shown         = 0x080156a5;
@@ -179,5 +180,13 @@ gfx_drawtext7 = 0x080277c3 ;
 /* keyb */
 f_4101 = 0x0804ec67 ;
 kb_handler = 0x0804f94d ;
+kb_keycode = 0x2001e890;
+kb_keypressed = 0x2001e5f8;
+kb_key_row_col = 0x2001e7ba;
+kb_key_press_time = 0x2001e7be; /* UNVERIFIED */
+
+backlight_timer = 0x2001e7f8;
 
 gui_opmode2 = 0x2001e94b ;
+
+selected_channel = 0x2001e850; /* ??? */

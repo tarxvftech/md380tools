@@ -14,106 +14,30 @@
 #include "spiflash.h"
 #include "addl_config.h"
 #include "radio_config.h"
+#include "syslog.h"
 
 addl_config_t global_addl_config;
 
-uint8_t spiflash_read_uint8( int offset )
+void cfg_fix_dmrid()
 {
-    char buf[1];
-    md380_spiflash_read(buf, spi_flash_addl_config_start + offset, 1);
-    return buf[0] - '0' ;
-}
-
-void spiflash_write_uint8( int offset, uint8_t val )
-{
-    char buf[2];
-    buf[0] = '0' + val ;
-    buf[1] = 0 ;
-    spiflash_write_with_type_check(buf, spi_flash_addl_config_start + offset, 1);
-}
-
-uint8_t spiflash_read_uint8_ranged( int offset, uint8_t cnt )
-{
-    uint8_t r = spiflash_read_uint8( offset );
-    if( r >= cnt ) {
-        // out of range, reset to default = 0
-        r = 0 ;
+    int dmrid = global_addl_config.dmrid ;
+    if( dmrid != 0 ) {
+        // store new dmr_id to ram and spi flash (codeplug)
+        md380_spiflash_write(&dmrid, FLASH_OFFSET_DMRID, 4);
+        md380_radio_config.dmrid = dmrid;
     }
-    return r ;
 }
 
-inline void spiflash_write_datef()
-{
-    spiflash_write_uint8( offset_datef, global_addl_config.datef );    
-}
 
-inline void spiflash_read_datef()
+void cfg_fix_radioname()
 {
-    global_addl_config.datef = spiflash_read_uint8_ranged( offset_datef, 6 );    
-}
-
-inline void spiflash_write_console()
-{
-    spiflash_write_uint8( offset_console, global_addl_config.console );    
-}
-
-inline void spiflash_read_console()
-{
-#if defined(FW_D13_020)    
-    global_addl_config.console = spiflash_read_uint8_ranged( offset_console, 4 );    
-#else
-    global_addl_config.console = 0 ;
-#endif    
-}
-
-inline void spiflash_write_promtg()
-{
-    spiflash_write_uint8( offset_promtg, global_addl_config.promtg );    
-}
-
-inline void spiflash_read_promtg()
-{
-    global_addl_config.promtg = spiflash_read_uint8_ranged( offset_promtg, 2 );    
-}
-
-inline void spiflash_write_micbargraph()
-{
-    spiflash_write_uint8( offset_micbargraph, global_addl_config.micbargraph );    
-}
-
-inline void spiflash_write_rbeep()
-{
-    spiflash_write_uint8( offset_rbeep, global_addl_config.rbeep );    
-}
-
-inline void spiflash_read_rbeep()
-{
-    global_addl_config.rbeep = spiflash_read_uint8_ranged( offset_rbeep, 2 );    
-}
-
-inline void spiflash_write_debug()
-{
-    spiflash_write_uint8( offset_debug, global_addl_config.debug );    
-}
-
-inline void spiflash_read_debug()
-{
-    global_addl_config.debug = spiflash_read_uint8_ranged( offset_debug, 2 );    
-}
-
-inline void spiflash_read_micbargraph()
-{
-    global_addl_config.micbargraph = spiflash_read_uint8_ranged( offset_micbargraph, 2 );    
-}
-
-inline void spiflash_write_userscsv()
-{
-    spiflash_write_uint8( offset_userscsv, global_addl_config.userscsv );    
-}
-
-inline void spiflash_read_userscsv()
-{
-    global_addl_config.userscsv = spiflash_read_uint8_ranged( offset_userscsv, 2 );    
+    char *rname = global_addl_config.rname;
+    if( rname[0] != 0x00 ) {
+        md380_spiflash_write(&rname, FLASH_OFFSET_RNAME, 32);
+        for (uint8_t ii = 0; ii < 32; ii++) {
+            md380_radio_config.radioname[ii] = rname[ii];
+        }
+    }
 }
 
 void cfg_read_struct( addl_config_t *cfg )
@@ -126,67 +50,117 @@ void cfg_write_struct( addl_config_t *cfg )
     spiflash_write_with_type_check(cfg, spi_flash_addl_config_start, sizeof(addl_config_t));
 }
 
-void read_compat()
+uint8_t calc_crc( void *buf, int size)
 {
-    spiflash_read_rbeep();
-    spiflash_read_datef();
-    spiflash_read_userscsv();
-    spiflash_read_debug();
-    spiflash_read_promtg();
-    spiflash_read_micbargraph();
-    spiflash_read_console();    
+    uint8_t crc = 0 ;
+    uint8_t *p = buf ;
+    for(int i=0;i<size;i++) {
+        crc ^= p[i] ;
+    }
+    return crc ;
 }
 
-void write_compat()
-{
-    // compat
-    spiflash_write_promtg();
-    spiflash_write_micbargraph();
-    spiflash_write_micbargraph();
-    spiflash_write_rbeep();
-    spiflash_write_datef();
-    spiflash_write_userscsv();
-    spiflash_write_debug();
-    spiflash_write_console();    
-}
+#define R( ii, max ) { if( ii < 0 || ii > max ) { ii = 0 ; } }
 
 void cfg_load()
 {
-    cfg_read_struct( &global_addl_config );
+    memset( &global_addl_config, 0, sizeof(addl_config_t) );
     
-    int version = global_addl_config.version ;
-    if( version == '0' || version == '1' ) {
-        // old style
-        read_compat();
-        global_addl_config.dmrid = 0 ;
-    } else {
-        
-        // restore dmrid
-        int dmrid = global_addl_config.dmrid ;
-        if( dmrid != 0 ) {
-            md380_spiflash_write(&dmrid, 0x2084, 4);            
-            md380_radio_config.dmrid = dmrid;
-        }
+    addl_config_t tmp ;    
+    cfg_read_struct( &tmp );
+    
+    // the config in flash is bigger than mine.
+    if( tmp.length > sizeof(addl_config_t) ) {
+        // we cannot crc what we have not read. (for now).
+        LOGB("cfg oversized\n");
+        return ;        
     }
     
+    if( calc_crc(&tmp,tmp.length) != 0 ) {
+        // corrupted.
+        LOGB("cfg crc fail\n");
+        return ;
+    }
+
+    // copy the smaller config into our bigger config.
+    // leaving the rest 0.
+    memcpy(&global_addl_config,&tmp,tmp.length);
+    
+    // range limit
+    R(global_addl_config.userscsv,1);
+    R(global_addl_config.micbargraph,1);
+    R(global_addl_config.debug,1);
+    R(global_addl_config.rbeep,1);
+    R(global_addl_config.promtg,1);
+    R(global_addl_config.boot_demo,1);
+    R(global_addl_config.boot_splash,2);
+    R(global_addl_config.netmon,3);
+    R(global_addl_config.datef,5);
+
+    // restore dmrid
+    cfg_fix_dmrid();
+
+    // restore radio name
+    if (global_addl_config.userscsv == 1) {
+        cfg_fix_radioname();
+    }
+
     // global_addl_config.experimental is intentionally not permanent
     global_addl_config.experimental = 0;
+
+#if defined(FW_D13_020)    
+#else
+    global_addl_config.netmon = 0 ;
+#endif    
 }
 
 void cfg_save()
 {
-    global_addl_config.version = 1 ;
+    global_addl_config.crc = 0 ;
+    global_addl_config.length = sizeof(addl_config_t);
+    
+    global_addl_config.crc = calc_crc(&global_addl_config,sizeof(addl_config_t));
+    
     cfg_write_struct( &global_addl_config );
-
-    //TODO: maybe allow for an option to write back compat, for downgrades. no fun.
 }   
+
+void cfg_set_radio_name()
+{
+    char callsign[10] = {0x00};
+
+    if (get_dmr_user_field(2, callsign, global_addl_config.dmrid, 10) == 0) {
+        strncpy(callsign, "UNKNOWNID", 10);
+    }
+
+    for (uint8_t ii = 0 ; ii < 20; ii++) {
+        toplinetext[ii] = 0x00;
+        if (ii%2 == 0) {
+            toplinetext[ii] = callsign[ii/2];
+        }
+    }
+
+    for (uint8_t ii = 0 ; ii < 32; ii++) {
+        if (ii%2 == 0 && ii < 20) {
+            md380_radio_config.radioname[ii] = callsign[ii/2];
+            global_addl_config.rname[ii] = callsign[ii/2];
+        } else {
+            md380_radio_config.radioname[ii] = 0x00;
+            global_addl_config.rname[ii] = 0x00;
+        }
+    }
+
+    cfg_save();
+    md380_spiflash_write(&md380_radio_config.radioname, FLASH_OFFSET_RNAME, 4);
+}
 
 void init_global_addl_config_hook(void)
 {
+    LOGB("booting\n");
+    
     cfg_load();
 
-#ifdef CONFIG_MENU
+//#ifdef CONFIG_MENU
     md380_create_main_meny_entry();
-#endif
+//#endif    
 }
 

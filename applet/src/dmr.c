@@ -30,9 +30,6 @@
 #include "radiostate.h"
 
 
-/* Used to avoid duplicate call endings. */
-int incall=0;
-
 /* global Bufferspace to transfer data*/
 //char DebugLine1[30];
 //char DebugLine2[160];  // only for debug normal is 80
@@ -102,30 +99,6 @@ typedef struct lc_hdr {
     uint8_t fid ;
 } lc_hdr_t ;
 
-inline const char* get_flco_str( lc_t *lc )
-{
-    switch( get_flco(lc) ) {
-        case 0 :
-            // Group Voice Channel User
-            return "grp" ;
-        case 3 :
-            // Unit to Unit Voice Channel User
-            return "u2u" ;
-        case 4 :
-            return "talker alias hdr" ;
-        case 5 :
-            return "talker alias blk 1" ;
-        case 6 :
-            return "talker alias blk 2" ;
-        case 7 :
-            return "talker alias blk 3" ;
-        case 8 :
-            return "gpsinfo" ;
-        default: 
-            return "?" ;
-    }
-}
-
 // Control Signalling Block (CSBK) PDU
 // TODO: finish / validate
 typedef struct mbc {
@@ -146,16 +119,6 @@ inline uint8_t get_csbko( mbc_t *mbc )
 }
 
 
-// Full Link Control PDU
-void dump_full_lc( lc_t *lc )
-{
-    uint8_t flco = get_flco(lc);
-    uint8_t fid = lc->fid ;
-    uint8_t opts = lc->svc_opts ;
-    
-    PRINT("flco=%02x %s fid=%d svc=%d src=%d dst=%d\n",flco,get_flco_str(lc), fid,opts,get_adr(lc->src),get_adr(lc->dst));    
-}
-
 // unvalidated
 void dump_mbc( mbc_t *mbc )
 {
@@ -166,15 +129,15 @@ void dump_mbc( mbc_t *mbc )
     PRINT("src=%d dst=%d\n",get_adr(mbc->sms.src),get_adr(mbc->sms.dst));
 }
 
-void dump_data( data_hdr_t *data )
-{
-    //TODO: print DPF (6.1.1))
-    // 9.3.17 from part 1
-    int sap = get_sap(data);
-    int blocks = get_blocks(data);
-    int dpf = get_dpf(data);
-    PRINT("sap=%d %s dpf=%d %s src=%d dst=%d %d\n", sap, sap_to_str(sap), dpf, dpf_to_str(dpf), get_adr(data->src),get_adr(data->dst), blocks);
-}
+//void dump_data( data_hdr_t *data )
+//{
+//    //TODO: print DPF (6.1.1))
+//    // 9.3.17 from part 1
+//    int sap = get_sap(data);
+//    int blocks = get_blocks(data);
+//    int dpf = get_dpf(data);
+//    PRINT("sap=%d %s dpf=%d %s src=%d dst=%d %d\n", sap, sap_to_str(sap), dpf, dpf_to_str(dpf), get_adr(data->src),get_adr(data->dst), blocks);
+//}
 
 void dumpraw_lc(uint8_t *pkt)
 {
@@ -202,21 +165,22 @@ void dumpraw_mbc(uint8_t *pkt)
     dump_mbc(mbc);
 }
 
-void dumpraw_data(uint8_t *pkt)
-{
-    uint8_t tp = (pkt[1] >> 4) ;
-    PRINT("type=%d ", tp );
-
-    data_hdr_t *data = (data_hdr_t*)(pkt + 2);
-    dump_data(data);
-}
+//void dumpraw_data(uint8_t *pkt)
+//{
+//    uint8_t tp = (pkt[1] >> 4) ;
+//    PRINT("type=%d ", tp );
+//
+//    data_hdr_t *data = (data_hdr_t*)(pkt + 2);
+//    dump_data(data);
+//}
 
 #ifdef FW_D13_020
 void dmr_CSBK_handler_hook(uint8_t *pkt)
 {
-    PRINTRET();
-    PRINTHEX(pkt,14);
-    PRINT("\n");
+//    PRINTRET();
+//    PRINT("CSBK: ");
+//    PRINTHEX(pkt,14);
+//    PRINT("\n");
 
     dmr_CSBK_handler(pkt);
 }
@@ -239,35 +203,13 @@ void *dmr_call_end_hook(uint8_t *pkt)
        of the packet.
      */
 
-//    //Destination adr as Big Endian.
-//    int dst = (pkt[7] |
-//            (pkt[6] << 8) |
-//            (pkt[5] << 16));
-//    //Source comes next.
-//    int src = (pkt[10] |
-//            (pkt[9] << 8) |
-//            (pkt[8] << 16));
-//    
-//    int groupcall = (pkt[2] & 0x3F) == 0;
-
     {
-        lc_t *data = (pkt + 2);
+        lc_t *data = (void*)(pkt + 2);
         rst_term_with_lc( data );
     }
 
-    //printf("\n");
-    //printhex((char*)pkt,14);
-
-//    if( incall ) {
-//        printf("\nCall from %d to %s%d ended.\n", src, groupcall ? "group ":"", dst);
-//    }
-//    incall = 0;
-
-    PRINT("ce " );
-    dumpraw_lc(pkt);
-
     //Forward to the original function.
-    return dmr_call_end((void*) pkt);
+    return dmr_call_end(pkt);
 }
 
 void *dmr_call_start_hook(uint8_t *pkt)
@@ -292,8 +234,6 @@ void *dmr_call_start_hook(uint8_t *pkt)
        10 00 00 00 00 00 00 63 30 05 54 73 2c 36
      */
 
-    //    dump_pkt( "cs", (pkt_t*) pkt );
-
     //Destination adr as Big Endian.
     int dst = (pkt[7] |
             (pkt[6] << 8) |
@@ -306,7 +246,7 @@ void *dmr_call_start_hook(uint8_t *pkt)
     int groupcall = (pkt[2] & 0x3F) == 0;
 
     {
-        lc_t *data = (pkt + 2);
+        lc_t *data = (void*)(pkt + 2);
         rst_voice_lc_header( data );
     }
 
@@ -327,21 +267,6 @@ void *dmr_call_start_hook(uint8_t *pkt)
     g_src = src;
     OS_EXIT_CRITICAL(primask);
 
-
-
-    //This prints a dot at every resynchronization frame.
-    //It can distract AMBE2+ logging.
-    //printf(".");
-
-//    if( incall == 0 ) {
-//        printf("\nCall from %d to %s%d started.\n", src, groupcall ? "group ":"", dst);
-//    }
-//    //Record that we are in a call, for later logging.
-//    incall = 1;
-
-    PRINT("cs " );
-    dumpraw_lc(pkt);
-    
     //Forward to the original function.
     return dmr_call_start(pkt);
 }
@@ -425,13 +350,13 @@ void *dmr_handle_data_hook(char *pkt, int len)
 //    //Turn on the red LED to know that we're here.
 //    red_led(1);
 
-    printf("Data:       ");
-    printhex(pkt, len + 2);
-    printf("\n");
+//    printf("Data:       ");
+//    printhex(pkt, len + 2);
+//    printf("\n");
 
     {
         data_blk_t *data = (void*)(pkt + 2);
-        rst_data_block(data);
+        rst_data_block(data,len);
     }
 
     //Forward to the original function.
