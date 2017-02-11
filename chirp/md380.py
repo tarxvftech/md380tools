@@ -797,6 +797,8 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
 
         if mem.mode == "DMR":
             _mem.slot = mem.colorcode << 4 | mem.timeslot << 2 
+            print(mem)
+            print(mem.txgroup)
             _mem.contact = mem.txgroup
             _mem.grouplist = mem.rxgroup
             print("Setting mem %s txgroup to contact idx %s slot= %x"%(str(mem.number), str(mem.txgroup), _mem.slot))
