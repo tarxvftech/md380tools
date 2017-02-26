@@ -109,7 +109,7 @@ struct {
 } scanlists[20];
 
 #seekto 0x0001EE00;
-struct { //0x1F025 into rdt
+struct { //0x1F025 into rdt?
 //unknown features:
     //emergency system
     //private call confirm, emergency alarm ack, data call confirm
@@ -124,9 +124,10 @@ struct { //0x1F025 into rdt
     // DCS probably doesn't work at all
 
   //First byte is 62 for digital, 61 for analog
+  //0x25 into rdt
   u8 mode;   //Upper nybble is 6 for normal squelch, 4 for tight squelch
              //Low nybble is
-             //61 for digital, 61 for nbfm, 69 for wbfm
+             //|2 for digital, |1 for nbfm, |8 for 25khz  (fm)
   u8 slot;       //Upper nybble is the color code
                  //lower nybble is bitfield:
                  // |4 for S1, |8 for S2
@@ -135,6 +136,7 @@ struct { //0x1F025 into rdt
                  //slotnotes:  0000 0000
                  //            colr 12rt
   char priv;           //Upper nybble is 0 for cleartex, 1 for Basic Privacy, 2 for Enhanced Privacy.
+                        //upper nybble |4 is "send compressed udp data header"
                        //Low nybble is key index.  (E is slot 15, 0 is slot 1.)
   char wase0;          //Unknown, normally E0
                         //0xa0 for "compressed udp data header" turned on
@@ -147,18 +149,36 @@ struct { //0x1F025 into rdt
                         // low nibble: unknown, usually 0x4
                        // 0 0  0 0   0 0  0 0
                        // CcCf HpVx            
-
   char wasc3;          //Unknown, normally C3
+  //0x2E
   ul16 contact;        //Digital contact name.  (TX group.)  TODO
+  //0x2D
   char unknown[3];     //Certainly analog or digital settings, but I don't know the bits yet.
+  //0x30
   u8 scanlist;         //Not yet supported.
+  //0x31 into rdt
   u8 grouplist;        //DMR Group list index. TODO
-  char unknown2[3];
+  //0x32
+  char gpssystem; //0x00 for none, 0x01 for gps system 1, 0x10 for gps system 16
+  //0x33
+  char unknown22;
+  //0x34
+  char unknown23;
+  //0x35
   lbcd rxfreq[4];
+  //0x39
   lbcd txfreq[4];      //Stored as frequency, not offset.
+  //0x3D
   lbcd ctone[2];       //Receiver tone.  (0xFFFF when unused.)
   lbcd rtone[2];       //Transmitter tone.
-  char yourguess[4];
+  //0x41
+  char yourguess11;
+  char yourguess12;
+  char yourguess2;
+  char   gps; 
+                //|1 for disable send gps data
+                //|2 for disable receive gps data
+//0x45
   char name[32];    //UTF16-LE
 } memory[1000];
 
@@ -236,8 +256,11 @@ struct {
     char utilities1; //when all options available, 0xff
     char utilities2; //when all options available, 0xbf
         // 0x3f if vox disabled, 0xbf if vox enabled
-    char utilities3; //when all options on, 0xfb
+    char utilities3; 
+        //lower |8=1 is GPS disabled
+        //when all options on, 0xfb //this is from before gps was known
         // 0xfb if front panel programming allowed, 0xff is fpp disabled
+
     
 } menuoptions;
 
@@ -284,6 +307,28 @@ struct {
     char name[32];          // U16L chars
     ul16 contactidxs[32];    // list of contact indexes in this RX Group
 } rxgrouplist[200]; //supposed to be 250, but weirdness in last 12 rxgroups, so now 200
+
+#seekto 0x3EC3B; //0x3EE60 in RDT
+struct { //16 byte struct
+    char ff1[4]; //0xff normally
+    //0x64
+    char ff2;
+    //0x65
+    ul16 revert_to_channel_by_idx; 
+        // 0 = don't revert channel (send gps data to currently selected channel)
+        // 1 = channel/memory index
+    u8 report_interval; //none=0, 30s=1, 60s=2, 30 second increments up to 7200 seconds ( dec int 240 here)
+    char ff3;
+    ul16 destination_contact_by_idx;
+        // 0 = no contact
+        // 1 = first contact
+    char ff4;
+    char ff5[4];
+
+//gps2 with channel1, 7200s, contact1
+//0x3ee70: ffff ffff ff01 00f0 ff01 00ff ffff ffff
+
+} gpssystems[16];
 
 """
 
@@ -478,31 +523,6 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
             # v = kwargs[k]
             # self._memobj.general.dmrid.set_value(v)
     
-# struct {
-    # u8 unknownff;
-    # bbcd prog_yr[2];
-    # bbcd prog_mon;
-    # bbcd prog_day;
-    # bbcd prog_hour;
-    # bbcd prog_min;
-    # bbcd prog_sec;
-    # u8 unknownver[4];       //Probably version numbers.
-    # u8 unknownff2[52];    //Maybe unused?  All FF.
-    # char line1[20];         //Top line of text at startup.
-    # char line2[20];         //Bottom line of text at startup.
-    # u8 unknownff3[24];      //all FF
-    # u8 flags1; //FE
-    # u8 flags2; //6B for no beeps, 6F will all beeps.
-    # u8 flags3; //EE
-    # u8 flags4; //FF 
-    # ul32 dmrid; //0x2084
-    # u8 flags5[13];  //Unknown settings, seem mostly used.
-    # u8 screenlit; //00 for infinite delay, 01 for 5s, 02 for 10s, 03 for 15s.
-    # u8 unknownff4[2];
-    # u8 unknownzeroes[8];
-    # u8 unknownff5[16];
-    # u32 radioname[32]; //Like all other strings.
-# } general;
 
     @classmethod
     def match_model(cls, filedata, filename):
@@ -575,6 +595,10 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
             
 
         print("MD380 unfix")
+
+    def enable_gps(self):
+        self._memobj.utilities3 = 0xF3 
+        #also enables front panel programming, but I don't think anyone will complain
     
     # Return information about this radio's features, including
     # how many memories it has, what bands it supports, etc
