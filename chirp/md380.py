@@ -28,8 +28,7 @@ from chirp import bitwise, errors
 try:
     from chirp.dmr import *
 except:
-    print("Current Chirp does not have DMR support.")
-    #this will fail to import anyway, due to references to things in chirp.dmr
+    print("Current Chirp does not have DMR support. This driver will fail!")
 
 
 from chirp.settings import RadioSetting, RadioSettingGroup, \
@@ -41,11 +40,11 @@ import logging
 LOG = logging.getLogger(__name__)
 import tempfile
 import os
+
 try:
     from md380tools.md380_dfu import *
 except:
-    #this will fail to import anyway, due to references to things in md380tools
-    print("md380tools not available for import, will not be able to read and write to radio directly")
+    print("md380tools not found as a module. This driver will fail!")
 
 
 # Someday I'll figure out Chinese encoding, but for now we'll stick to ASCII.
@@ -55,7 +54,7 @@ CHARSET = ["%i" % int(x) for x in range(0, 10)] + \
     [chr(x) for x in range(ord("a"), ord("z") + 1)] + \
     list(".,:;*#_-/&()@!?^ +") + list("\x00" * 100)
 DUPLEX = ["", "-", "+", "split"];
-#TODO 'DMR' should be added as a valid mode.
+
 MODES = ["DMR", "NFM", "FM"];
 TMODES = ["", "Tone", "TSQL"]
 BUTTON= { #not complete
@@ -200,12 +199,10 @@ struct {
 } info;
 
 #seekto 0x59C0; //0x5be5
-//not tested
+//not tested, endianness unsure
 struct {
-    //char enhanced [ 8 ][ 16 ] ; //bitwise doesn't seem to like this
-    //this could be better, please fix me
     struct {
-        char key[16];
+        char key[16]; 
     } enhanced[8];
     u16 basic[ 16 ] ;
 } encryption_keys;
@@ -213,28 +210,6 @@ struct {
 #seekto 0x2102; //0x2327 rdt
 // not yet tested
 struct {
-//  for each:
-//      0x01 is all alert tones toggle
-//      0x02 is emergency on
-//      0x03 is emergency off
-//      0x04 is high/low power
-//      0x05 is monitor
-//      0x06 is nuisance delete
-//      0x07 is one touch access 1
-//      0x08 is ota 2
-//      0x09 is ota 3
-//      0x0A is ota 4
-//      0x0B is ota 5
-//      0x0C must be ota 6
-//      0x0d is talkaround
-//      0x0e is scan toggle
-//      0x15 is squelch toggle
-//      0x16 is privacy toggle
-//      0x17 is vox toggle
-//      0x18 is zone select 
-//      0x1e is manual dial for private
-//      0x1f is lone work toggle
-
     char button1short;
     char button1long;
     char button2short;
@@ -243,6 +218,7 @@ struct {
 
 #seekto 0x20F1; //0x2316 rdt
 struct {
+// in original cps:
 // contacts has 8 options
 // utilities has 12 options
 // call log has 3 options
@@ -261,7 +237,7 @@ struct {
     char utilities2; //when all options available, 0xbf
         // 0x3f if vox disabled, 0xbf if vox enabled
     char utilities3; 
-        //lower |8=1 is GPS disabled
+        // |8 is GPS disabled
         //when all options on, 0xfb //this is from before gps was known
         // 0xfb if front panel programming allowed, 0xff is fpp disabled
 
@@ -329,7 +305,7 @@ struct { //16 byte struct
     char ff4;
     char ff5[4];
 
-//gps2 with channel1, 7200s, contact1
+//gps2 with channel1, 7200s, contact1 (from rdt file)
 //0x3ee70: ffff ffff ff01 00f0 ff01 00ff ffff ffff
 
 } gpssystems[16];
