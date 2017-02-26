@@ -58,7 +58,7 @@ DUPLEX = ["", "-", "+", "split"];
 #TODO 'DMR' should be added as a valid mode.
 MODES = ["DMR", "NFM", "FM"];
 TMODES = ["", "Tone", "TSQL"]
-BUTTON= {
+BUTTON= { #not complete
         "alert_tones_toggle":0x01,
         "emergency_on":0x02,
         "emergency_off":0x03,
@@ -67,9 +67,13 @@ BUTTON= {
         "nuisance_delete":0x06,
         "ota_1":0x07,
         "ota_2":0x08,
+        "ota_3":0x09,
+        "ota_4":0x0A,
+        "ota_5":0x0B,
+        "ota_6":0x0C,
         "talkaround":0x0d,
         "scan_toggle":0x0e,
-        "squelch_toggle":0x0d,
+        "squelch_toggle":0x15,  #according to my notes, but some doubts
         "privacy_toggle":0x16,
         "vox_toggle":0x17,
         "zone_select":0x18,
@@ -590,15 +594,33 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
             print("adding mem %d to %s"%(i,b.get_name()))
             bm.add_memory_to_mapping(m,b)
 
-
-
-            
-
         print("MD380 unfix")
 
     def enable_gps(self):
         self._memobj.utilities3 = 0xF3 
         #also enables front panel programming, but I don't think anyone will complain
+
+    def set_buttons(self, four_el_arr):
+        b = self._memobj.buttons
+        b.button1short = BUTTON[ four_el_arr[0] ]
+        b.button1long =  BUTTON[ four_el_arr[1] ]
+        b.button2short = BUTTON[ four_el_arr[2] ]
+        b.button2long =  BUTTON[ four_el_arr[3] ]
+
+    def button_name_by_value(self,value):
+        for name, val in BUTTON.iteritems():
+            if value == val:
+                return name
+        return None
+
+    def get_buttons(self):
+        b = self._memobj.buttons
+        arr = []
+        arr[0] = button_name_by_value( b.button1short )
+        arr[1] = button_name_by_value( b.button1long )
+        arr[2] = button_name_by_value( b.button2short )
+        arr[3] = button_name_by_value( b.button2long )
+        return arr
     
     # Return information about this radio's features, including
     # how many memories it has, what bands it supports, etc
