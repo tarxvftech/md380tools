@@ -210,10 +210,10 @@ struct {
 #seekto 0x2102; //0x2327 rdt
 // not yet tested
 struct {
-    char button1short;
-    char button1long;
-    char button2short;
-    char button2long;
+    u8 button1short;
+    u8 button1long;
+    u8 button2short;
+    u8 button2long;
 } buttons;
 
 #seekto 0x20F1; //0x2316 rdt
@@ -562,7 +562,7 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
         print("MD380 unfix")
 
     def enable_gps(self):
-        self._memobj.utilities3 = 0xF3 
+        self._memobj.menuoptions.utilities3 = 0xF3 
         #also enables front panel programming, but I don't think anyone will complain
 
     def set_buttons(self, four_el_arr):
@@ -573,6 +573,7 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
         b.button2long =  BUTTON[ four_el_arr[3] ]
 
     def button_name_by_value(self,value):
+        value = int(value)
         for name, val in BUTTON.iteritems():
             if value == val:
                 return name
@@ -581,10 +582,10 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
     def get_buttons(self):
         b = self._memobj.buttons
         arr = []
-        arr[0] = button_name_by_value( b.button1short )
-        arr[1] = button_name_by_value( b.button1long )
-        arr[2] = button_name_by_value( b.button2short )
-        arr[3] = button_name_by_value( b.button2long )
+        arr.append( self.button_name_by_value( b.button1short ) )
+        arr.append( self.button_name_by_value( b.button1long  ) )
+        arr.append( self.button_name_by_value( b.button2short ) )
+        arr.append( self.button_name_by_value( b.button2long  ) )
         return arr
     
     # Return information about this radio's features, including
@@ -794,7 +795,7 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
             _mem.slot=0x14;
 
         if mem.mode == "DMR":
-            _mem.slot = mem.colorcode << 4 | mem.timeslot << 2 
+            _mem.slot = mem.colorcode << 4 | mem.timeslot << 2 | 1 #the 1 is to always enable talkaround
             _mem.contact = mem.txgroup
             _mem.grouplist = mem.rxgroup
             print("Setting mem %s txgroup to contact idx %s slot= %x"%(str(mem.number), str(mem.txgroup), _mem.slot))
