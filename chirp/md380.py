@@ -369,12 +369,7 @@ class MD380ContactList( DMRContactList ):
             if type(callid) == 'instance':
                 callid = int(callid, 16)
             if type(flags) == 'instance':
-                print("converting!")
-                print(flags)
                 flags = int(flags, 16)
-                print(flags)
-            else:
-                print("not converting")
             c = {'name':name, 'callid':callid, 'flags':flags}
             w.writerow( c )
 
@@ -417,12 +412,9 @@ class MD380BankModel(chirp_common.MTOBankModel):
     def get_mappings(self):
         banks = []
         for i in range(0, 99):
-            #bank = chirp_common.Bank(self, "%i" % (i+1), "MG%i" % (i+1))
             bank = MD380Bank(self, "%i" % (i+1), "MG%i" % (i+1))
             bank._radio=self._radio;
             bank.index = i;
-            #print "Bank #%i has name %s" % (i,bank.get_name());
-            #if len(bank.get_name())>0:
             banks.append(bank);
         return banks
 
@@ -482,7 +474,6 @@ class MD380BankModel(chirp_common.MTOBankModel):
         return banks
 
 
-# Uncomment this to actually register this radio in CHIRP
 @directory.register
 class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio ):
     """MD380 Binary File"""
@@ -497,12 +488,6 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
     
     _memsize=262144;
 
-    # def settings(self, **kwargs):
-        # if "dmrid" in kwargs.items():
-            # k = "dmrid"
-            # v = kwargs[k]
-            # self._memobj.general.dmrid.set_value(v)
-    
 
     @classmethod
     def match_model(cls, filedata, filename):
@@ -514,48 +499,52 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
     def __init__(self,*args, **kwargs):
         super( MD380Radio, self).__init__(*args,**kwargs)
 
+
+    def set_rxgrouplist(self, rxgrouplistidx, name, contactidxs):
+        i = rxgrouplistidx
+        self._memobj.rxgrouplist[i].name = name
+        self._memobj.rxgrouplist[i].contactidxs = contactidxs
+
+    def set_contact( self, contactidx, name, callid, flags ):
+        i = contactidx
+        self._memobj.contacts[i].name = name
+        self._memobj.contacts[i].callid = callid
+        self._memobj.contacts[i].flags = flags
+
+
     def fix(self):
-        print("MD380.fix(), do not expect to work.")
+        #regarding fix and unfix: sorry!
+        print("MD380.fix() - move these bits elsewhere")
         # super( MD380Radio, self).fix()
         self.rxgroups = self.rxgrouplist( [ self.rxgroup(x) for x in self._memobj.rxgrouplist ] )
         self.contacts = self.contactlist( [ self.contact(x) for x in self._memobj.contacts    ] )
 
     def unfix(self):
-        print("MD380.unfix(), super broken, don't expect to work!")
+        print("MD380.unfix() - move these bits elsewhere")
         try:
             self.rxgroups.resolve( self )
         except Exception as e:
             print("During rxgroups resolve in unfix()", e)
             raise(e)
 
-        i=0
         for i in range(0, len(self.rxgroups)):
-            print(i)
             try:
                 g = self.rxgroups[i].out()
-                print(g)
-                self._memobj.rxgrouplist[i].name = g['name']
-                self._memobj.rxgrouplist[i].contactidxs = g['contactidxs']
-                i+=1
+                self.set_rxgrouplist( i, g['name'], g['contactidxs'] )
             except IndexError as e:
-                print(e)
-        i=0
+                print(i, g, e)
         for i in range(0, len(self.contacts)):
-            print(i)
             try:
                 c = self.contacts[i].out()
-                print(c)
-                self._memobj.contacts[i].name = c['name']
-                self._memobj.contacts[i].callid = c['callid']
-                self._memobj.contacts[i].flags = c['flags']
-                i+=1
+                self.set_contact(i, c['name'], c['callid'], c['flags'])
             except IndexError as e:
-                print(e)
-
+                print(i, c, e)
 
         # super( MD380Radio, self).unfix()
         bm = self.get_bank_model()
         bs = bm.get_mappings()
+
+        #remove all zone channels (so adding all channels to zones can work)
         for b in bs:
             print(b.get_name())
             ms = bm.get_mapping_memories( b )
@@ -563,11 +552,11 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
                 bm.remove_memory_from_mapping( m, b )
 
         l,h = self.get_features().memory_bounds
+        #add all channels to a zone numerically (for testing, TODO)
         for i in xrange(l, h+1):
             m = self.get_memory(i)
             b = bs[(i-1)/16]
             b.set_name( "Z%d"%((i-1)/16) )
-            print("adding mem %d to %s"%(i,b.get_name()))
             bm.add_memory_to_mapping(m,b)
 
         print("MD380 unfix")
@@ -601,6 +590,7 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
     # Return information about this radio's features, including
     # how many memories it has, what bands it supports, etc
     def get_features(self):
+        #TODO GPS feature?
         rf = chirp_common.RadioFeatures()
         rf.has_bank = True
         rf.has_bank_index = True
@@ -633,8 +623,6 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
         elif(len(self._mmap)==self._memsize+565):
             self._memobj = bitwise.parse(MEM_FORMAT, self._mmap[549:])
         self.fix()
-        #self._memobj = bitwise.parse(
-        #    MEM_FORMAT, self._mmap)
     
     def sync_in(self):
         """Download from the radio."""
@@ -681,12 +669,10 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
         mem.number = number;
         mem.name = utftoasc(str(_mem.name)).rstrip()  # Set the alpha tag
         mem.freq = int(_mem.rxfreq)*10;
-        # print("get_memory freq: %d rxfreq: %d"%( mem.freq, _mem.rxfreq))
         
         ctone=int(_mem.ctone)/10.0;
         rtone=int(_mem.rtone)/10.0;
 
-        
         # Anything with an unset frequency is unused.
         # Maybe we should be looking at the mode instead?
         if mem.freq >500e6:
@@ -698,12 +684,6 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
             mem.offset=mem.freq;
             _mem.mode=0x61; #Narrow FM.
         
-
-        
-        #print "Tones for %s are %s and %s" %(
-        #    mem.name, rtone, ctone);
-        #mem.rtone=91.5
-        #mem.ctone=97.4 #88.5
         if ctone==1666.5 and rtone!=1666.5:
             mem.rtone=rtone;
             #mem.ctone=rtone;  #Just one tone here, because the radio can't store a second.
@@ -735,7 +715,7 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
             mem.duplex="split";
         
         mem.mode="DMR";
-        rmode=_mem.mode&0x0F;
+        rmode= _mem.mode & 0x0F;
         if rmode==0x02:
             mem.mode="DMR";
         elif rmode==0x01:
@@ -748,21 +728,17 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
 
         if mem.mode == "DMR":
             slot = _mem.slot
-            print( mem.name, slot )
-            # print(mem.name)
-            # print("\tSlot: ",bin(slot))
             color = slot >> 4
             rxonly = slot & 0x2
             slot = (slot & 12) >> 2
-            print("C,S,rxonly", color, slot, rxonly)
             mem.timeslot = slot
             mem.colorcode = color
+
         mem.txgroup = _mem.contact
         mem.rxgroup = _mem.grouplist
         if mem.name in ["Empty",'']:
             mem.empty = True
 
-        
         return mem
 
     # Store details about a high-level memory to the memory map
@@ -815,12 +791,10 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
             _mem.mode=0x69;
         
         if _mem.slot==0xff:
-            _mem.slot=0x14;  #TODO Make this 0x18 for S2.
+            _mem.slot=0x14;
 
         if mem.mode == "DMR":
             _mem.slot = mem.colorcode << 4 | mem.timeslot << 2 
-            print(mem)
-            print(mem.txgroup)
             _mem.contact = mem.txgroup
             _mem.grouplist = mem.rxgroup
             print("Setting mem %s txgroup to contact idx %s slot= %x"%(str(mem.number), str(mem.txgroup), _mem.slot))
