@@ -810,6 +810,9 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
 
             
 
+    def set_bootlines(self,line1,line2):
+        self._memobj.general.line1 = asctoutf( line1.ljust(10) )
+        self._memobj.general.line2 = asctoutf( line2.ljust(10) )
 
     def get_settings(self):
         _general = self._memobj.general
