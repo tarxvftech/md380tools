@@ -17,6 +17,7 @@ https://groups.google.com/forum/#!forum/md380tools. No extra registration
 should be necessary. You could also feed it via e-mail at 
 md380tools@googlegroups.com. So feel free to put in your questions into it!
 
+A few of us are also on the #md380 IRC channel on Freenode.
 
 # Introduction #
 
@@ -137,6 +138,7 @@ is under development for Android.
 * [SUSE](docs/suse.md)
 * [Raspberry Pi](docs/raspi.md)
 * [Windows](docs/windows.md)
+* [MacOS](docs/macos.md)
 
 ###Additional steps for linux based installations###
 
@@ -192,12 +194,6 @@ firmware.  You can check your version in Menu/Utilities/Radio
 Info/Version.  If it's a recent date you're good; if it's a number,
 you need to upgrade.
 
-To actively watch incoming calls, printing a call log with name and
-callsign:
-
-**md380-tool calllog will only work with D02 firmware. See https://github.com/travisgoodspeed/md380tools/issues/493**
-
-    md380-tool calllog
 
 To dump the recent dmesg log:
 
