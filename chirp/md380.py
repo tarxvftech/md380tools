@@ -235,7 +235,7 @@ struct {
                     //  |1 is
     char utilities1; //when all options available, 0xff
     char utilities2; //when all options available, 0xbf
-        // 0x3f if vox disabled, 0xbf if vox enabled
+        // 0x3f if vox menu item disabled, 0xbf if vox enabled
     char utilities3; 
         // |8 is GPS disabled
         //when all options on, 0xfb //this is from before gps was known
@@ -864,3 +864,4 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
 
     def get_bank_model(self):
         return MD380BankModel(self)
+
