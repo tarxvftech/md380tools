@@ -58,6 +58,7 @@ DUPLEX = ["", "-", "+", "split"];
 MODES = ["DMR", "NFM", "FM"];
 TMODES = ["", "Tone", "TSQL"]
 BUTTON= { #not complete
+        "unassigned":0x00,
         "alert_tones_toggle":0x01,
         "emergency_on":0x02,
         "emergency_off":0x03,
@@ -72,11 +73,11 @@ BUTTON= { #not complete
         "ota_6":0x0C,
         "talkaround":0x0d,
         "scan_toggle":0x0e,
-        "squelch_toggle":0x15,  #according to my notes, but some doubts
+        "squelch_toggle":0x15,
         "privacy_toggle":0x16,
         "vox_toggle":0x17,
         "zone_select":0x18,
-        "manual_dial":0x1e,
+        "manual_dial":0x1e, #are these correct? don't agree with md380-codeplug
         "lone_work_toggle":0x1f,
         }
 
