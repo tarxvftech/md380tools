@@ -241,7 +241,7 @@ struct {
                     //  |1 is
     char utilities1; //when all options available, 0xff
     char utilities2; //when all options available, 0xbf
-        // 0x3f if vox disabled, 0xbf if vox enabled
+        // 0x3f if vox menu item disabled, 0xbf if vox enabled
     char utilities3; 
         // |8 is GPS disabled
         //when all options on, 0xfb //this is from before gps was known
@@ -604,6 +604,7 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
         rf.has_bank_names = True
         rf.can_odd_split = True
         rf.valid_tmodes = TMODES
+        rf.valid_power_levels = ["HIGH","LOW"]
         rf.memory_bounds = (1, 999)  # Maybe 1000?
         
         rf.valid_bands = [(400000000, 480000000), # 70cm model is most common.
@@ -774,6 +775,12 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
             _mem.txfreq = _mem.rxfreq;
         _mem.name = asctoutf(mem.name,32);
         
+        if mem.power == "LOW":
+            #this does not yet account for vox, but it fixes where vox may appear because power was not set to a 'clean' value
+            # during programming
+            _mem.power = "\x04"
+        else: #HIGH by default
+            _mem.power = "\x24"
         #print "Tones in mode %s of %s and %s for %s" % (
         #    mem.tmode, mem.ctone, mem.rtone, mem.name);
         # These need to be 16665 when unused.
@@ -870,3 +877,4 @@ class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio 
 
     def get_bank_model(self):
         return MD380BankModel(self)
+
