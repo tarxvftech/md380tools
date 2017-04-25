@@ -103,6 +103,12 @@ struct {
   char name[32]; //U16L chars, of course.
 } contacts[1000];
 
+#seekto 0x0000ec20;
+struct {
+  char name[32];
+  ul16 members[32];
+} grouplists[250];
+
 
 #seekto 0x00018860;
 struct {
