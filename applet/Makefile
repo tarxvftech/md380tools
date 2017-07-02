@@ -4,7 +4,7 @@ MKLISTING=1
 FW ?= D13_020
 
 ifeq (,$(wildcard mark.tmp))
-	# not exists
+  # not exists
   PROBLEM=0	
 else
   old_build := $(shell cat mark.tmp)
@@ -53,7 +53,16 @@ SRCS += lastheard.o
 SRCS += etsi.o
 SRCS += sms.o
 SRCS += beep.o
-SRCS += irq_handlers.o # DL4YHF 2017-01-06
+SRCS += irq_handlers.o
+SRCS += narrator.o
+SRCS += lcd_driver.o
+SRCS += font_8_8.o
+SRCS += app_menu.o
+SRCS += color_picker.o
+SRCS += amenu_hexmon.o
+SRCS += amenu_utils.o
+SRCS += amenu_set_tg.o
+SRCS += amenu_codeplug.o
 SRCS += timer.o
 
 ifdef INC_DISPFLIP
@@ -84,6 +93,7 @@ ifdef MKLISTING
 CFLAGS += -Wa,-a=$(@:.o=.lst)
 endif
 CFLAGS += -D$(FWDEFINE)	
+CFLAGS += $(CIFLAGS)
 ###################################################
 
 vpath %.c src
@@ -174,7 +184,8 @@ image_D13:
 image_S13:
 	"${MAKE}" FW=S13_020 all  
 
+.PHONY: ci
 ci:
-	"${MAKE}" clean image_D02
-	"${MAKE}" clean image_S13
-	"${MAKE}" clean image_D13
+	"${MAKE}" CIFLAGS="-Werror -Wno-cpp" clean image_D02
+	"${MAKE}" CIFLAGS="-Werror -Wno-cpp" clean image_S13
+	"${MAKE}" CIFLAGS="-Werror -Wno-cpp" clean image_D13
