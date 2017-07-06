@@ -153,44 +153,55 @@ class DFU(object):
 
     def download(self, block_number, data):
         self._device.ctrl_transfer(0x21, Request.DNLOAD, block_number, 0, data)
-        # time.sleep(0.1);
 
-    def set_address(self, address):
+    def set_address(self, address, wait_till_ready_instead=False):
         a = address & 0xFF
         b = (address >> 8) & 0xFF
         c = (address >> 16) & 0xFF
         d = (address >> 24) & 0xFF
         self._device.ctrl_transfer(0x21, Request.DNLOAD, 0, 0, [0x21, a, b, c, d])
-        self.get_status()  # this changes state
-        status = self.get_status()  # this gets the status
-        if status[2] == State.dfuDNLOAD_IDLE:
+        if wait_till_ready_instead: #needed for MD2017
             if self.verbose:
-                print("Set pointer to 0x%08x." % address)
-            self.enter_dfu_mode()
+                print("Set pointer to 0x%08x and wait_till_ready." % address)
+            self.wait_till_ready()
+            return True
         else:
-            if self.verbose:
-                print("Failed to set pointer.")
-            return False
-        return True
+            self.get_status()  # this changes state
+            status = self.get_status()  # this gets the status
+            if status[2] == State.dfuDNLOAD_IDLE:
+                if self.verbose:
+                    print("Set pointer to 0x%08x." % address)
+                self.enter_dfu_mode()
+            else:
+                if self.verbose:
+                    print("Failed to set pointer.")
+                return False
+            return True
 
-    def erase_block(self, address):
+    def erase_block(self, address, wait_till_ready_instead=False):
         a = address & 0xFF
         b = (address >> 8) & 0xFF
         c = (address >> 16) & 0xFF
         d = (address >> 24) & 0xFF
         self._device.ctrl_transfer(0x21, Request.DNLOAD, 0, 0, [0x41, a, b, c, d])
-        # time.sleep(0.5);
-        self.get_status()  # this changes state
-        status = self.get_status()  # this gets the status
-        if status[2] == State.dfuDNLOAD_IDLE:
+        if wait_till_ready_instead: #needed for MD2017
             if self.verbose:
-                print("Erased 0x%08x." % address)
-            self.enter_dfu_mode()
+                print("Erased 0x%08x and wait_till_ready." % address)
+            self.wait_till_ready()
+            return True
         else:
-            if self.verbose:
-                print("Failed to erase block.")
-            return False
-        return True
+            # time.sleep(0.5);
+            self.get_status()  # this changes state
+            status = self.get_status()  # this gets the status
+            if status[2] == State.dfuDNLOAD_IDLE:
+                if self.verbose:
+                    print("Erased 0x%08x." % address)
+                self.enter_dfu_mode()
+            else:
+                if self.verbose:
+                    print("Failed to erase block.")
+                return False
+            return True
 
     def md380_custom(self, a, b):
         """Sends a secret MD380 command."""
@@ -230,6 +241,24 @@ class DFU(object):
                                           length)  # length
         return data
 
+    def identify_radio(self):
+        if self.verbose:
+            print("identifying radio (0xA2 0x01)")
+        self._device.ctrl_transfer(0x21, 1, 0, 0, [0xA2, 0x01])
+        self.get_status()
+        self.clear_status()
+        self.get_status()
+        self.clear_status()
+        self.get_status()
+        data = self._device.ctrl_transfer(0xA1, 2, 0, 0, 32)
+        self.get_status()
+        self.clear_status()
+        self.get_status()
+        self.clear_status()
+        self.get_status()
+        return data.tostring()
+
+
     def get_command(self):
         data = self._device.ctrl_transfer(0xA1,  # request type
                                           Request.UPLOAD,  # request
@@ -258,7 +287,7 @@ class DFU(object):
     def wait_till_ready(self, desired_state=State.dfuIDLE):
         state = 11
         status, timeout, state, discarded = self.get_status()
-        while state != State.dfuIDLE:
+        while state != desired_state:
             self.clear_status()
             status, timeout, state, discarded = self.get_status()
         return

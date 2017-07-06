@@ -37,7 +37,7 @@ import time
 import usb.core
 
 import dfu_suffix
-from DFU import DFU, State
+from DFU import DFU, State, Enumeration
 
 # The tricky thing is that *THREE* different applications all show up
 # as this same VID/PID pair.
@@ -76,36 +76,93 @@ def download(dfu, data, flash_address):
     finally:
         print()
 
+class RadioModels(Enumeration):
+    map = {
+        0: 'MD380',
+        1: 'MD2017',
+    }
+RadioModels.create_from_map()
 
 def download_codeplug(dfu, data):
     """Downloads a codeplug to the MD380."""
     block_size = 1024
+    dfu.wait_till_ready()
 
     dfu.md380_custom(0x91, 0x01)  # Programming Mode
     dfu.md380_custom(0x91, 0x01)  # Programming Mode
-    # dfu.md380_custom(0xa2,0x01); #Returns "DR780...", seems to crash client.
-    # hexdump(dfu.get_command());  #Gets a string.
-    dfu.md380_custom(0xa2, 0x02)
-    hexdump(dfu.get_command())  # Gets a string.
+    radioid = dfu.identify_radio() #0xa2 0x01
+    if radioid[0:4] == "2017":
+        thisradio=RadioModels.MD2017
+    else:
+        thisradio=RadioModels.MD380
     time.sleep(2)
     dfu.md380_custom(0xa2, 0x02)
+    hexdump(dfu.get_command())  # Gets a string.
     dfu.md380_custom(0xa2, 0x03)
+    hexdump(dfu.get_command())  # Gets a string.
     dfu.md380_custom(0xa2, 0x04)
+    hexdump(dfu.get_command())  # Gets a string.
     dfu.md380_custom(0xa2, 0x07)
+    hexdump(dfu.get_command())  # Gets a string.
+    """ 
+    sudo modprobe usbmon, wireshark-gtk, !(frame.len == 64) && usb.src == "host"
+    MD-2017
+    ✔    9101
+    ✔    9101
+    ✔    a201
+    ✔    a202
+    ✔    a203
+    ✔    a204
+    ✔    a207
+    ✔    41:00:00:00:00
+    ✔    41:00:00:01:00
+    ✔    41:00:00:02:00
+    ✔    41:00:00:03:00
+    ✔    41:00:00:11:00
+    ✔    41:00:00:12:00
+    ✔    41:00:00:13:00
+    ✔    41:00:00:14:00
+    ✔    41:00:00:15:00
+    ✔    41:00:00:16:00
+    ✔    41:00:00:17:00
+    ✔    41:00:00:18:00
+    ✔    41:00:00:19:00
+    ✔    21:00:00:00:00
+    ✔    start copying
+        after wValue == 0x41
+        21:00:00:01:00, wValue = 2
+        after wValue == 0x41
+        21:00:00:02:00, wValue = 2
+    rpt
+    debug notes:
+        249 not accurate for MD2017? Shifted 16 bytes starting at 0x40235
 
-    dfu.erase_block(0x00000000)
-    dfu.erase_block(0x00010000)
-    dfu.erase_block(0x00020000)
-    dfu.erase_block(0x00030000)
+    """
 
+    dfu.erase_block(0x00000000,True)
+    dfu.erase_block(0x00010000,True)
+    dfu.erase_block(0x00020000,True)
+    dfu.erase_block(0x00030000,True)
+    if thisradio == RadioModels.MD2017:
+        dfu.erase_block(0x00110000,True)
+        dfu.erase_block(0x00120000,True)
+        dfu.erase_block(0x00130000,True)
+        dfu.erase_block(0x00140000,True)
+        dfu.erase_block(0x00150000,True)
+        dfu.erase_block(0x00160000,True)
+        dfu.erase_block(0x00170000,True)
+        dfu.erase_block(0x00180000,True)
+        dfu.erase_block(0x00190000,True)
+        addr_multiplier = 0
+        
     dfu.set_address(0x00000000)  # Zero address, used by configuration tool.
 
-    # sys.exit();
-
     status, timeout, state, discarded = dfu.get_status()
-    # print(status, timeout, state, discarded)
+    #print(status, timeout, state, discarded)
 
     block_number = 2
+    next_set = False
+    print("sending %d bytes, %f blocks"%(len(data),len(data)/block_size))
 
     try:
         while len(data) > 0:
@@ -113,15 +170,29 @@ def download_codeplug(dfu, data):
             if len(packet) < block_size:
                 packet += '\xFF' * (block_size - len(packet))
             dfu.download(block_number, packet)
-            state = 11
-            while state != State.dfuDNLOAD_IDLE:
-                status, timeout, state, discarded = dfu.get_status()
-                # print(status, timeout, state, discarded)
+            dfu.wait_till_ready()
+            #state = 11
+            #while state != State.dfuDNLOAD_IDLE:
+            #    status, timeout, state, discarded = dfu.get_status()
+                #print(status, timeout, state, discarded)
             sys.stdout.write('.')
             sys.stdout.flush()
             block_number += 1
+            if thisradio == RadioModels.MD2017 and block_number == 0x42:
+                #set pointer to same blocks we erased above
+                block_number = 2
+                addr_multiplier += 1
+                if addr_multiplier > 3 and not next_set:
+                    next_set = True
+                    addr_multiplier = 1
+                    data = data[16:] #skip 16 bytes to solve alignment issues - not sure why, this is just what the captures show
+                offset = 0 if not next_set else 0x100000  
+                if addr_multiplier > 9: print("Done!"); break
+                dfu.set_address(0x00000000 + offset +0x10000  * addr_multiplier, True)
+                print()
     finally:
         print()
+        dfu.md380_reboot()
 
 
 def hexdump(string):
@@ -356,7 +427,6 @@ def init_dfu(alt=0):
 
     if dev is None:
         raise RuntimeError('Device not found')
-
     dfu = DFU(dev, alt)
     dev.default_timeout = 3000
 
@@ -435,19 +505,21 @@ def main():
                 f = open(sys.argv[2], 'rb')
                 data = f.read()
                 f.close()
+                print(len(data),data[0:5])
 
                 if sys.argv[2][-4:] == '.dfu':
                     suf_len, vendor, product = dfu_suffix.check_suffix(data)
                     dfu = init_dfu()
-                    firmware = data[:-suf_len]
-                elif sys.argv[2][-4:] == '.rdt' and len(data) == 262709 and data[0:5] == 'DfuSe':
+                    codeplug = data[:-suf_len]
+                elif sys.argv[2][-4:] == '.rdt' and ( len(data) == 262709 or len(data) == 852533 ) and data[0:5] == 'DfuSe':
+                    #small is md380 codeplug, large is MD2017
                     dfu = init_dfu()
-                    firmware = data[549:len(data) - 16]
+                    codeplug = data[549:len(data) - 16]
                 else:
                     dfu = init_dfu()
-                    firmware = data
+                    codeplug = data
 
-                download_codeplug(dfu, firmware)
+                download_codeplug(dfu, codeplug)
                 print('Write complete')
 
             elif sys.argv[1] == 'sign':
@@ -498,6 +570,12 @@ def main():
                 import usb.core
                 dfu = init_dfu()
                 dfu.abort()
+            elif sys.argv[1] == "ident":
+                dfu = init_dfu()
+                import binascii
+                rid = dfu.identify_radio()
+                print(binascii.hexlify(rid))
+                print(rid)
             else:
                 usage()
         else:
