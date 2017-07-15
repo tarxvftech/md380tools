@@ -3,7 +3,7 @@ OPT = download
 else
 endif
 
-all: unwrapped/D002.032.img unwrapped/S013.020.img unwrapped/D013.020.img unwrapped/D003.020.img
+all: unwrapped/D002.032.img unwrapped/S013.020.img unwrapped/D013.020.img unwrapped/D003.020.img unwrapped/TYT2017-D3.31.img
 	
 clean:
 	"${MAKE}" -f Makefile_orig clean

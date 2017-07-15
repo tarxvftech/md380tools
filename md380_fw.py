@@ -13,20 +13,6 @@ class TYTFW(object):
         pad_length = (align - len(self.app) % align) % align
         self.app += byte * pad_length
 
-    def wrap(self):
-        bin = b''
-        header = struct.Struct(self.header_fmt)
-        footer = struct.Struct(self.footer_fmt)
-        self.pad()
-        app = self.crypt(self.app)
-        bin += header.pack(
-            self.magic, self.jst, b'\xff' * 9, self.foo,
-            self.bar, b'\xff' * 47, self.start, len(app),
-                                  b'\xff' * 120)
-        bin += self.crypt(self.app)
-        bin += footer.pack(b'\xff' * 240, self.footer)
-        return bin
-
     def unwrap(self, img):
         header = struct.Struct(self.header_fmt)
         header = header.unpack(img[:256])
@@ -106,6 +92,14 @@ class MD2017FW(TYTFW):
         self.header_fmt = '<16s9s7s16s33s43s8sLLL112s'
         self.footer_fmt = '<240s16s'
         self.rsrcSize = 0x5D400
+
+    def unwrap(self, img):
+        header = struct.Struct(self.header_fmt)
+        header = header.unpack(img[:256])
+
+        self.start = header[6]
+        app_len = header[7]
+        self.app = self.crypt(img[256:256 + app_len])
 
     def wrap(self):
         bin = b''
@@ -205,11 +199,38 @@ class MD380FW(TYTFW):
         self.header_fmt = '<16s7s9s16s33s47sLL120s'
         self.footer_fmt = '<240s16s'
 
+    def wrap(self):
+        bin = b''
+        header = struct.Struct(self.header_fmt)
+        footer = struct.Struct(self.footer_fmt)
+        self.pad()
+        app = self.crypt(self.app)
+        bin += header.pack(
+            self.magic, self.jst, b'\xff' * 9, self.foo,
+            self.bar, b'\xff' * 47, self.start, len(app),
+                                  b'\xff' * 120)
+        bin += self.crypt(self.app)
+        bin += footer.pack(b'\xff' * 240, self.footer)
+        return bin
+
+def radioFW(name):
+    radios = {
+            "MD2017":MD2017FW,
+            "MD380":MD380FW
+            }
+    for k in radios.iterkeys():
+        if name.upper() in k:
+            return radios[k]
+    raise KeyError
+
+
+
 def main():
     def hex_int(x):
         return int(x, 0)
 
-    parser = argparse.ArgumentParser(description='Wrap and unwrap MD-380 firmware')
+    parser = argparse.ArgumentParser(description='Wrap and unwrap MD-380 and MD2017 firmware')
+    parser.add_argument('--radio', '-r', dest='radioname', default=None, help='Radio model (MD380 or MD2017, default MD380 if not provided and can\'t be guessed from input filename)') #default gets set below
     parser.add_argument('--wrap', '-w', dest='wrap', action='store_true',
                         default=False,
                         help='wrap app into firmware image')
@@ -234,10 +255,17 @@ def main():
     with open(args.input[0], 'rb') as f:
         input = f.read()
 
+    if args.radioname is None: #if not explicitly set, try and guess from filename
+        radioname = "MD2017" if "TYT2017" in args.input[0] else "MD380"
+        print("Guessing %s for radio model"%(radioname))
+    else:
+        radioname = args.radioname
+
     if args.wrap:
         if args.offset > 0:
             print('INFO: skipping 0x%x bytes in input file' % args.offset)
-        md = MD380FW(args.addr)
+        
+        md = radioFW(radioname)(args.addr)
         md.app = input[args.offset:]
         if len(md.app) == 0:
             sys.stderr.write('ERROR: seeking beyond end of input file\n')
@@ -247,7 +275,7 @@ def main():
         print('INFO: length 0x{0:x}'.format(len(md.app)))
 
     elif args.unwrap:
-        md = MD380FW()
+        md = radioFW(radioname)(args.addr)
         try:
             md.unwrap(input)
         except AssertionError:
@@ -258,7 +286,7 @@ def main():
                 sys.stderr.write(hl + '\n')
             sys.stderr.write('Trying anyway.\n')
         output = md.app
-        print('INFO: base address 0x{0:x}'.format(md.start))
+        #print('INFO: base address 0x{0:x}'.format(md.start))
         print('INFO: length 0x{0:x}'.format(len(md.app)))
 
     print('DEBUG: writing "%s"' % args.output[0])

@@ -33,6 +33,11 @@ else ifeq ($(FW),S13_020)
     PATCHDIR=s13.020
     MERGEBASE=0x809c000
     INC_DISPINIT=1
+else ifeq ($(FW),D3.31)
+    FWDEFINE=FW_2017
+    SRCVERSION=D3.31
+    PATCHDIR=D3.31
+    MERGEBASE=0x809B000
 else 
 $(error select firmware version)
 endif
@@ -74,6 +79,14 @@ endif
 ifdef INC_DISPINIT
 SRCS +=  dispinit.o
 endif
+
+
+ifeq ($(FW),D3.31) #MD2017 Thanks to KG5RKI
+  SRCS  = main.o printf.o dmesg.o system_stm32f4xx.o
+  SRCS += spiflash.o usb.o usersdb.o
+  SRCS += radiostate.o etsi.o dmr.o
+endif
+
 
 ###################################################
 
