@@ -35,8 +35,8 @@ else ifeq ($(FW),S13_020)
     INC_DISPINIT=1
 else ifeq ($(FW),D3.31)
     FWDEFINE=FW_2017
-    SRCVERSION=D3.31
-    PATCHDIR=D3.31
+    SRCVERSION=d3.31
+    PATCHDIR=d3.31
     MERGEBASE=0x809B000
 else 
 $(error select firmware version)
