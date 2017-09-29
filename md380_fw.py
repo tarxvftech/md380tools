@@ -97,9 +97,16 @@ class MD2017FW(TYTFW):
         header = struct.Struct(self.header_fmt)
         header = header.unpack(img[:256])
 
+        print(header)
         self.start = header[6]
-        app_len = header[7]
+        rsrc_len = header[7]
+        print('rsrc_len %x' % rsrc_len)
+        prg_len = header[9]
+        print('prg_len %x' % prg_len)
+        app_len = rsrc_len + prg_len
+        print('applen %x' % app_len)
         self.app = self.crypt(img[256:256 + app_len])
+        self.app = self.app[rsrc_len:]
 
     def wrap(self):
         bin = b''
