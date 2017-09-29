@@ -31,8 +31,8 @@ image_D13:
 image_S13:
 	"${MAKE}" -C applet FW=S13_020 all  
 
-image_D3.31:
-	"${MAKE}" -C applet FW=D3.31 all  
+image_D3_31:
+	"${MAKE}" -C applet FW=D3_31 all  
 
 original_D13: 
 	"${MAKE}" -C firmware unwrapped/D013.020.img
@@ -46,8 +46,8 @@ original_D02:
 original_D03: 
 	"${MAKE}" -C firmware unwrapped/D003.020.img
 
-original_D3.31: 
-	"${MAKE}" -C firmware unwrapped/TYT2017-D3.31.img
+original_D3_31: 
+	"${MAKE}" -C firmware unwrapped/TYT2017-D3_31.img
 
 flash_original_D13: original_D13
 	./md380-dfu upgrade firmware/bin/D013.020.bin
@@ -73,7 +73,7 @@ flash_D13: image_D13
 flash_S13: image_S13
 	./md380-dfu upgrade applet/experiment.bin
 
-flash_D3.31: image_D3.31
+flash_D3_31: image_D3_31
 	./md380-dfu upgrade applet/experiment.bin
 
 sync:

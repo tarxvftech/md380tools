@@ -27,8 +27,10 @@
 #include "util.h"
 #include "spiflash.h"
 
+#ifndef FW_2017
 #include "irq_handlers.h" // Initially written by DL4YHF as a 'playground' with various interrupt handlers .
                           // Details in applet/src/irq_handlers.c . 
+#endif
 
 						  
 GPIO_InitTypeDef  GPIO_InitStructure;
@@ -101,8 +103,8 @@ const char *str2wide(char *widestring,
 
 
 
+#ifndef FW_2017
 //Make the welcome image scroll across the screen.
-
 void demo_show_animation(void)
 {
     for (int i = 0; i < 0x60; i += 3) {
@@ -127,6 +129,7 @@ void demo(void)
     demo_show_animation();
     demo_clear();
 }
+#endif
 
 void boot_splash_set_topline(void)
 {

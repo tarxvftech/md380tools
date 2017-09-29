@@ -69,3 +69,34 @@ gui_opmode1_prev = 0x2001FDFD ;
 m_cntr2 = 0x2001FCC8 ;
 gfx_font_small = 0x080EB018 ;
 gfx_font_norm = 0x080EB058 ;
+
+gfx_drawtext                             = 0x0800E31D ;
+gfx_drawbmp                              = 0x0802DAB9;
+
+md380_itow                               = 0x0801BE1D ;
+
+md380_RTC_GetDate                        = 0x0803717B ;
+md380_RTC_GetTime                        = 0x08037047 ;
+
+draw_datetime_row                        = 0x0800E3E9 ;
+draw_statusline                          = 0x08047225 ;
+
+gfx_clear3                               = 0x08024F79 ;
+
+contact2                                 = 0x2001F454 ;
+contact                                  = 0x2001FB48 ;
+channel_name                             = 0x2001F49C ;
+
+F_4315                                   = 0x080304FD ;
+f_4225                                   = 0x080276DD ;
+
+md380_radio_config                       = 0x2001EB98 ;
+
+draw_zone_channel                        = 0x0800F13D ;
+backlight_timer                          = 0x2001FD4A ;
+
+zone_name                                = 0x2001DD0C ;
+md380_menu_id                            = 0x2001FDC5 ;
+
+f_1444                                   = 0x0803B0B1 ;
+

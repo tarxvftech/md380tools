@@ -33,7 +33,7 @@ else ifeq ($(FW),S13_020)
     PATCHDIR=s13.020
     MERGEBASE=0x809c000
     INC_DISPINIT=1
-else ifeq ($(FW),D3.31)
+else ifeq ($(FW),D3_31)
     FWDEFINE=FW_2017
     SRCVERSION=d3.31
     PATCHDIR=d3.31
@@ -81,10 +81,12 @@ SRCS +=  dispinit.o
 endif
 
 
-ifeq ($(FW),D3.31) #MD2017 Thanks to KG5RKI
+ifeq ($(FW),D3_31) #MD2017 Thanks to KG5RKI
   SRCS  = main.o printf.o dmesg.o system_stm32f4xx.o
   SRCS += spiflash.o usb.o usersdb.o
-  SRCS += radiostate.o etsi.o dmr.o
+  SRCS += radiostate.o etsi.o dmr.o 
+  SRCS += gfx.o keyb.o lastheard.o 
+  SRCS += debug.o syslog.o console.o util.o netmon.o
 endif
 
 
