@@ -38,6 +38,7 @@ import usb.core
 
 import dfu_suffix
 from DFU import DFU, State, Enumeration
+import struct
 
 # The tricky thing is that *THREE* different applications all show up
 # as this same VID/PID pair.
@@ -278,8 +279,6 @@ def upload_codeplug(dfu, filename):
 
 def breakout_header_and_footer_if_present(data):
     if data[0:14] == "OutSecurityBin" and data[-16:] == "OutputBinDataEnd":
-        if dfu.verbose:
-            print("Skipping 0x100 byte header in data file")
         header, data, footer = data[:0x100], data[0x100:], data[-0x100:]
         return header, data, footer
     return None, data, None
@@ -296,6 +295,21 @@ Please hold PTT and the button above it while rebooting.  You
 should see the LED blinking green and red, and then your
 radio will be ready to accept this firmware update."""
 }
+
+def parse_firmware_header(header):
+    #32bit int at 0x7C is the number of sections
+    # each section is a 32 bit int for the location in flash 
+    #  and then another which is length to write there
+    num_sections = struct.unpack_from("<I",header,0x7C)[0]
+    sections = []
+    for i in range(num_sections):
+         section_start, section_length = struct.unpack_from("<II",header,0x80+i*8)
+         sections.append( (section_start, section_length) )
+    return {
+            "num_firmware_locations": num_sections,
+            "firmware_locations_and_lengths": sections
+            }
+
 
 def download_firmware_md2017(dfu, data):
     """
@@ -655,6 +669,14 @@ def main():
                     data = f.read()
                     dfu = init_dfu()
                     download_firmware(dfu, data)
+
+            elif sys.argv[1] == "parsetest":
+                with open(sys.argv[2], 'rb') as f:
+                    data = f.read()
+                    header, firmware, footer = breakout_header_and_footer_if_present(data)
+                    header_dict = parse_firmware_header( header )
+                    print(header_dict)
+
 
             elif sys.argv[1] == 'write':
                 import usb.core
