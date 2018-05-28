@@ -309,9 +309,7 @@ def download_firmware_md2017(dfu, data):
         0006 0000
             first write location in flash
         0005 d400
-            location in (headerless) bin where next stuff to be written to flash will come from
-                    #related to 0005d500 offset into bin (so 5d400 into headerless bin!) where 21:00:c0:00:08 write takes place, presumably picking up where 21:00:00:0b:00 left off?
-                    #yes, confirmed. but how does it know when to break it off?
+            oh, lol, duh. this is the length of the first location
         0800 c000
             next location to write to in flash
         000e 5800
@@ -319,6 +317,10 @@ def download_firmware_md2017(dfu, data):
             where to split somehow?
             918k?
             aha! it's the length of what's to be written to last location
+        so it goes 
+            number of locations is written in the header
+            and then a location, and a length in bytes to be written there
+            and then your write in order of those locations!
 
     first 0x100 into bin for header
     last 0x100 end of bin is footer
