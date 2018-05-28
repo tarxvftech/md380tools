@@ -178,6 +178,13 @@ class DFU(object):
                 return False
             return True
 
+    def erase_blocks(self, addresses, wait_till_ready_instead=False):
+        for address in addresses:
+            if self.verbose:
+                print("Erasing address@ 0x%x" % address)
+                sys.stdout.flush()
+            self.erase_block(address, wait_till_ready_instead)
+
     def erase_block(self, address, wait_till_ready_instead=False):
         a = address & 0xFF
         b = (address >> 8) & 0xFF
@@ -240,6 +247,10 @@ class DFU(object):
                                           index,  # index
                                           length)  # length
         return data
+    def we_are_in_firmware_upgrade_mode(self):
+        # Are we in the right mode?
+        mfg = self.get_string(1)
+        return mfg == u'AnyRoad Technology' #True if in firmware write mode, false otherwise
 
     def identify_radio(self):
         if self.verbose:

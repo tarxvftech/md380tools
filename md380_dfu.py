@@ -276,6 +276,172 @@ def upload_codeplug(dfu, filename):
     finally:
         print("Done.")
 
+def breakout_header_and_footer_if_present(data):
+    if data[0:14] == "OutSecurityBin" and data[-16:] == "OutputBinDataEnd":
+        if dfu.verbose:
+            print("Skipping 0x100 byte header in data file")
+        header, data, footer = data[:0x100], data[0x100:], data[-0x100:]
+        return header, data, footer
+    return None, data, None
+
+
+
+firmware_upload_wrong_mode_strings={
+    "MD2017":"""ERROR: You forgot to enter the bootloader.
+Please hold PTT and the orange button next to volume knob while rebooting.  You
+should see the LED blinking green and red, and then your
+radio will be ready to accept this firmware update.""",
+    "MD380":"""ERROR: You forgot to enter the bootloader.
+Please hold PTT and the button above it while rebooting.  You
+should see the LED blinking green and red, and then your
+radio will be ready to accept this firmware update."""
+}
+
+def download_firmware_md2017(dfu, data):
+    """
+    sudo modprobe usbmon, wireshark-gtk, !(frame.len == 64) && usb.src == "host"
+    rdt header 
+        00000070: ffff ffff ffff ffff ffff ffff 0200 0000  ................
+        00000080: 0000 0600 00d4 0500 00c0 0008 0058 0e00  .............X..
+
+        0000 0002
+            ? maybe how many chunks?
+        0006 0000
+            first write location in flash
+        0005 d400
+            location in (headerless) bin where next stuff to be written to flash will come from
+                    #related to 0005d500 offset into bin (so 5d400 into headerless bin!) where 21:00:c0:00:08 write takes place, presumably picking up where 21:00:00:0b:00 left off?
+                    #yes, confirmed. but how does it know when to break it off?
+        0800 c000
+            next location to write to in flash
+        000e 5800
+            if that's a location into unwrapped bin, it's right on 1k boundary (bytes 8840 4462 1ca5 b921 at 0x0e5900) but not anything else special i can see
+            where to split somehow?
+            918k?
+            aha! it's the length of what's to be written to last location
+
+    first 0x100 into bin for header
+    last 0x100 end of bin is footer
+    i count 1291k written or so
+    1321984 or 142c00 long file
+    1321984 bytes in 1291k of writes, so file fits perfectly in bytes written
+
+    following appears to be from flashing TYT2017-UV\(REC\)-D3.31.bin in file 
+    firmware_to_radio_but_for_real_this_time.pcapng.gz
+    0x21 
+        9101
+        a201
+        a231
+        a203
+        a207
+        9131
+
+        //this part is new
+        erase these
+        41:00:00:06:00
+        41:00:00:07:00
+        41:00:00:08:00
+        41:00:00:09:00
+        41:00:00:0a:00
+        41:00:00:0b:00
+        41:00:00:0c:00
+        41:00:00:0d:00
+        41:00:00:0e:00
+        41:00:00:0f:00
+
+        write these:
+        5*64k and 1*53k, == 373k
+        21:00:00:06:00, data 1024 wValue == 0x02, wValue++, until wValue == 0x41
+            first bytes:
+            offset 0x100 into wrapped bin
+            00aa89891f4beccf424514540065eb66417d549051423915ea
+        21:00:00:07:00, data 1024
+        21:00:00:08:00, data 1024
+        21:00:00:09:00, data 1024
+        21:00:00:0a:00, data 1024
+        21:00:00:0b:00, data 1024, same except only until wValue == 0x36
+            last bytes:
+            2a81ee1fb5c918599923bb1d086505cf03ff563d52061f0744017bce2776891d
+
+        don't know where boundaries of data written are
+
+
+        //this part is almost exact same as md380
+        41:00:c0:00:08
+        41:00:00:01:08
+        41:00:00:02:08
+        41:00:00:04:08
+        41:00:00:06:08
+        41:00:00:08:08
+        41:00:00:0a:08
+        41:00:00:0c:08
+        41:00:00:0e:08
+
+        16k, 64k, 6*128k, 70k == 918k
+        21:00:c0:00:08, data, end 0x11
+            offset 0x5d500 into wrapped bin:
+            first bytes here:
+            309f89a9029ee2c72d491a5c7769e56e3e71
+        21:00:00:01:08, data, end 0x41
+        21:00:00:02:08, data, end 0x81
+        21:00:00:04:08, data, end 0x81
+        21:00:00:06:08, data, end 0x81
+        21:00:00:08:08, data, end 0x81
+        21:00:00:0a:08, data, end 0x81
+        21:00:00:0c:08, data, end 0x81
+        21:00:00:0e:08, data, end 0x47 // this line writes less data on md2017 than md380
+            very last bytes:
+            563d52061f0744017bce 2776 891d
+        end
+
+    """
+    addresses = [
+        0x00060000,
+        0x00070000,
+        0x00080000,
+        0x00090000,
+        0x000a0000,
+        0x000b0000,
+        0x000c0000,
+        0x000d0000,
+        0x000e0000,
+        0x000f0000,
+        0x0800c000,
+        0x08010000,
+        0x08020000,
+        0x08040000,
+        0x08060000,
+        0x08080000,
+        0x080a0000,
+        0x080c0000,
+        0x080e0000
+        ]
+    try:
+        if not dfu.we_are_in_firmware_upgrade_mode():
+            print(firmware_upload_wrong_mode_strings["MD2017"])
+            sys.exit(1)
+
+        print("Beginning firmware upgrade.")
+        sys.stdout.flush() # let text appear immediately (for mingw)
+        status, timeout, state, discarded = dfu.get_status()
+        assert state == State.dfuIDLE
+        
+        dfu.md380_custom(0x91, 0x01)
+        dfu.md380_custom(0x91, 0x31)
+
+        dfu.erase_blocks(addresses)
+
+        block_size = 1024
+        block_start = 2
+        address_idx = 0
+        header, data, footer = breakout_header_and_footer_if_present(data)
+
+
+        print("Writing firmware:")
+
+
+    except Exception as e:
+        print(e)
 
 def download_firmware(dfu, data):
     """ Download new firmware binary to the radio. """
@@ -300,13 +466,8 @@ def download_firmware(dfu, data):
              0x20000]  # e
     block_ends = [0x11, 0x41, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81]
     try:
-        # Are we in the right mode?
-        mfg = dfu.get_string(1)
-        if mfg != u'AnyRoad Technology':
-            print("""ERROR: You forgot to enter the bootloader.
-Please hold PTT and the button above it while rebooting.  You
-should see the LED blinking green and red, and then your
-radio will be radio to accept this firmware update.""")
+        if not dfu.we_are_in_firmware_upgrade_mode():
+            print(firmware_upload_wrong_mode_strings["MD380"])
             sys.exit(1)
 
         print("Beginning firmware upgrade.")
@@ -317,20 +478,13 @@ radio will be radio to accept this firmware update.""")
         dfu.md380_custom(0x91, 0x01)
         dfu.md380_custom(0x91, 0x31)
 
-        for address in addresses:
-            if dfu.verbose:
-                print("Erasing address@ 0x%x" % address)
-                sys.stdout.flush()
-            dfu.erase_block(address)
+        dfu.erase_blocks(addresses)
 
         block_size = 1024
         block_start = 2
         address_idx = 0
-
-        if data[0:14] == "OutSecurityBin":  # skip header if present
-            if dfu.verbose:
-                print("Skipping 0x100 byte header in data file")
-            header, data = data[:0x100], data[0x100:]
+        
+        header, data, footer = breakout_header_and_footer_if_present(data)
 
         print("Writing firmware:")
 
