@@ -55,7 +55,7 @@ md380_product = 0xdf11
 # application_size   = 0x00040000
 
 
-def download(dfu, data, flash_address):
+def unused_download(dfu, data, flash_address):
     block_size = 1 << 8
     sector_size = 1 << 12
     if flash_address & (sector_size - 1) != 0:
@@ -76,6 +76,45 @@ def download(dfu, data, flash_address):
             block_number += 1
     finally:
         print()
+
+def download(dfu,location,size,data):
+    print("make_download(location=%08x, size=%d, len(data)=%dk)"%(location,size,len(data)/1024))
+    write_size = 1024
+    full_write = 128
+    half_write = 64
+    full_write_size = 128*write_size
+    half_write_size = 64*write_size
+
+    x=location & (full_write_size -1)
+    if 0 < x < half_write_size:
+        y= half_write_size - x
+        number_of_possible_writes = y/write_size
+    elif 0 <= x < full_write_size:
+        y= full_write_size - x
+        number_of_possible_writes = y/write_size
+    number_of_writes_left = size/write_size
+    if number_of_writes_left > number_of_possible_writes:
+        number_of_writes_this_pass = number_of_possible_writes
+    else:
+        number_of_writes_this_pass = number_of_writes_left
+    print("write %dk"%(number_of_writes_this_pass))
+    dfu.set_address(location)
+    written = 0
+    for i in range(number_of_writes_this_pass):
+        block_num = i+2
+        packet = data[written:written+write_size]
+        # print("dfu.download, block_num=%02x len(packet)=%d"%(block_num,len(packet)))
+        dfu.download(block_num, packet)
+        dfu.wait_till_ready()
+        written += write_size
+    print("after ==  %08x"%(location+written))
+    left_to_write_here = size-written
+    new_location = location+written
+    print()
+    if left_to_write_here > 0:
+        return download(dfu, new_location, left_to_write_here, data[written:])
+    else:
+        return data[written:]
 
 class RadioModels(Enumeration):
     map = {
@@ -297,7 +336,7 @@ radio will be ready to accept this firmware update."""
 }
 
 def parse_firmware_header(header):
-    #32bit int at 0x7C is the number of sections
+    #32bit int at 0x7C is the number of sections - in md380s there is only one section and number of sections value is not set i suppose
     # each section is a 32 bit int for the location in flash 
     #  and then another which is length to write there
     num_sections = struct.unpack_from("<I",header,0x7C)[0]
@@ -339,7 +378,7 @@ def download_firmware_md2017(dfu, data):
     first 0x100 into bin for header
     last 0x100 end of bin is footer
     i count 1291k written or so
-    1321984 or 142c00 long file
+    1321984 or 142c00 long headerless and footerless file
     1321984 bytes in 1291k of writes, so file fits perfectly in bytes written
 
     following appears to be from flashing TYT2017-UV\(REC\)-D3.31.bin in file 
@@ -410,6 +449,7 @@ def download_firmware_md2017(dfu, data):
             563d52061f0744017bce 2776 891d
         end
 
+
     """
     addresses = [
         0x00060000,
@@ -422,6 +462,7 @@ def download_firmware_md2017(dfu, data):
         0x000d0000,
         0x000e0000,
         0x000f0000,
+
         0x0800c000,
         0x08010000,
         0x08020000,
@@ -447,13 +488,15 @@ def download_firmware_md2017(dfu, data):
 
         dfu.erase_blocks(addresses)
 
-        block_size = 1024
-        block_start = 2
-        address_idx = 0
         header, data, footer = breakout_header_and_footer_if_present(data)
-
-
+        header_dict = parse_firmware_header( header )
         print("Writing firmware:")
+        for location,size in header_dict["firmware_locations_and_lengths"]:
+            print("0x%08x : len = 0x%x bytes, %dk"%(location,size,size/1024))
+            data = download(dfu,location,size,data)
+            print()
+
+
 
 
     except Exception as e:
@@ -670,13 +713,11 @@ def main():
                     dfu = init_dfu()
                     download_firmware(dfu, data)
 
-            elif sys.argv[1] == "parsetest":
+            elif sys.argv[1] == "new_upgrade":
                 with open(sys.argv[2], 'rb') as f:
                     data = f.read()
-                    header, firmware, footer = breakout_header_and_footer_if_present(data)
-                    header_dict = parse_firmware_header( header )
-                    print(header_dict)
-
+                    dfu = init_dfu()
+                    download_firmware_md2017(dfu,data)
 
             elif sys.argv[1] == 'write':
                 import usb.core
