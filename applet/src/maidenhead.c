@@ -49,12 +49,11 @@ latlon maidenhead_locator_to_latlon( char * loc ){
         int precision = i/2;
         int div = maidenhead_precision_div(precision);
         char c = maidenhead_precision_char(precision);
+        int charval = loc[i] - c;
         if( i%2 == 0){
-            int charval = loc[i] - c;
             londiv *= div;
             out.lon += ((float)charval / (float)londiv) * 360;
         } else {
-            int charval = loc[i] - c;
             latdiv *= div;
             out.lat += ((float)charval / (float)latdiv) * 180;
         }
