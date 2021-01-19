@@ -6,7 +6,7 @@
 //  - a fast-scrolling CONTACTS list,
 //  - and maybe more in future .
 // Details in the implementation - see amenu_codeplug.c .
-#define AMENU_CHANNELS_H
+#ifndef AMENU_CHANNELS_H
 #define AMENU_CHANNELS_H
 
 extern int 	ZoneList_nEntries;		// number of entries in the zone list.
