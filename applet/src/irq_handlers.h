@@ -5,6 +5,10 @@
 //           for example for the software PWMed 'dimmed backlight'.
 //   Module prefix : "IRQ_" .
 
+#ifndef IRQ_HANDLERS_H
+#define IRQ_HANDLERS_H
+
+
 #ifndef  CONFIG_DIMMED_LIGHT   // want 'dimmable backlight' ?
 # define CONFIG_DIMMED_LIGHT 0 // guess not (else set CONFIG_DIMMED_LIGHT>0 in config.h)
 #endif
@@ -137,3 +141,5 @@ void BeepMute(void);  // mutes the beep without turning the audio PA off
 void BeepReset(void); // reprograms Timer8 for tytera's funny tones ("Boooo" & co) 
 
 #endif // CONFIG_MORSE_OUTPUT ?
+
+#endif

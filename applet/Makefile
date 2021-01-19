@@ -169,8 +169,11 @@ applet.elf: $(SRCS)
 #Temporary file containing the build date.
 #Might use version numbers when we're ready for releases.
 src/version.h: src/*.c
+	echo "#ifndef VERSION_H" >src/version.h
+	echo "#define VERSION_H" >>src/version.h
 	echo "#define VERSIONDATE L\"`date "+%Y-%m-%d"`\"" >src/version.h
 	echo "#define GIT_VERSION \"$(GIT_VERSION)\"" >>src/version.h
+	echo "#endif" >>src/version.h
 
 clean:
 	"${MAKE}" -C ../patches/$(PATCHDIR) clean

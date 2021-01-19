@@ -2,6 +2,9 @@
    \brief MD380 callback functions.
 */
 
+#ifndef MD380_H
+#define MD380_H
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -197,3 +200,4 @@ void f_4225();
 // major display driver for popup during RX/TX
 void F_4315();
 
+#endif

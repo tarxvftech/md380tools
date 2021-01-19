@@ -11,7 +11,8 @@ buffer.  Later reads grab 1024 bytes as an UPLOAD from Block 1,
 fetching the raw buffer.
 */
 
-
+#ifndef TOOLDFU_H
+#define TOOLDFU_H
 
 //Memory commands
 #define TDFU_DMESG                   0x00
@@ -37,3 +38,5 @@ fetching the raw buffer.
 #define TDFU_REMOTE_KEY_EVENT       0x85 // (u8 ascii, u8 up_down_flag)
 #define TDFU_REBOOT_TO_BOOTLOADER   0x86 // I suppose this falls under "remote control", so putting it here -mike
 
+
+#endif

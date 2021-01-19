@@ -5,6 +5,11 @@
 //  Simple 'hex monitor' to inspect blocks of memory.
 //  Implemented as a callback function for the 'application menu' (app_menu.c) .
 
+#ifndef AMENU_HEXMON_H
+#define AMENU_HEXMON_H
+
+
+
 #define HEXMON_DUMMY_ADDRESS_SPI_FLASH_START 0xC0000000 /* internal dummy address for the SPI Flash */
 #define HEXMON_DUMMY_ADDRESS_SPI_FLASH_END   0xC0FFFFFF /* end of the 16-MByte SPI flash dummy area */
   // (the entire 512-MByte block 0xC0000000 .. 0xDFFFFFFF is not used for anything in an STM32F405,
@@ -14,3 +19,4 @@ extern uint32_t HexMon_u32StartAddress;
 
 int am_cbk_HexMon(app_menu_t *pMenu, menu_item_t *pItem, int event, int param );
 
+#endif

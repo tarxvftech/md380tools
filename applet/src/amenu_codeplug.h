@@ -6,7 +6,8 @@
 //  - a fast-scrolling CONTACTS list,
 //  - and maybe more in future .
 // Details in the implementation - see amenu_codeplug.c .
-
+#ifndef AMENU_CODEPLUG_H
+#define AMENU_CODEPLUG_H
 extern int ZoneList_nEntries; // number of entries in the zone list.
 extern int ZoneList_iCurrent; // index of the currently selected (active) zone.
 
@@ -15,4 +16,4 @@ extern uint8_t channel_num; // <- belongs to THE ORIGINAL FIRMWARE (1..16, 0 for
 
 extern int am_cbk_ZoneList(app_menu_t *pMenu, menu_item_t *pItem, int event, int param );
 
-
+#endif
