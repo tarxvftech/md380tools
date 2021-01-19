@@ -171,7 +171,7 @@ applet.elf: $(SRCS)
 src/version.h: src/*.c
 	echo "#ifndef VERSION_H" >src/version.h
 	echo "#define VERSION_H" >>src/version.h
-	echo "#define VERSIONDATE L\"`date "+%Y-%m-%d"`\"" >src/version.h
+	echo "#define VERSIONDATE L\"`date "+%Y-%m-%d"`\"" >>src/version.h
 	echo "#define GIT_VERSION \"$(GIT_VERSION)\"" >>src/version.h
 	echo "#endif" >>src/version.h
 
