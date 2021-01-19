@@ -2,6 +2,9 @@
    \brief Kernel logging functions and buffers.
 */
 
+#ifndef DMESG_H
+#define DMESG_H
+
 //1kb buffer.  Verify that this is empty with reads.
 #define DMESG_START  0x2001f700  //0x2001d500
 #define DMESG_SIZE 1024
@@ -22,3 +25,5 @@ void dmesg_flush();
 void printhex(void *buf, int len);
 
 void printhex2(const char *buf, int len);
+
+#endif

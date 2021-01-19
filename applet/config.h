@@ -8,7 +8,8 @@
   The default version of this file, as found in the repository, is to
   be used for all external releases.
 */
-
+#ifndef CONFIG_H
+#define CONFIG_H
 
 /* Basic features that ought to be working in 2.032 but might be
    missing in later revisions. */
@@ -42,3 +43,5 @@
 //#define AMBEUNCORRECTEDPRINT
 
 //#define I2CPRINT
+//
+#endif

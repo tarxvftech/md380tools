@@ -9,6 +9,9 @@
 //  than with the original menu by Tytera (opened via green 'MENU' button).
 // 
 
+#ifndef APP_MENU_H
+#define APP_MENU_H
+
 #ifndef  CONFIG_APP_MENU   // Alternative menu activated by red 'BACK'-button ?
 # define CONFIG_APP_MENU 0 // only if defined > 0 in config.h
 #endif
@@ -294,3 +297,5 @@ void Menu_ReportItemInMorseCode(int morse_request); // used internally and by th
 
 
 #endif // CONFIG_APP_MENU ?
+
+#endif

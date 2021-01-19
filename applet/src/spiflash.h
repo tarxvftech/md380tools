@@ -1,6 +1,8 @@
 /*! \file spiflash.h
   \brief spiflash defines
 */
+#ifndef SPIFLASH_H
+#define SPIFLASH_H
 
 #include <stdint.h>
 
@@ -23,3 +25,5 @@ void    md380_spiflash_sektor_erase4k(uint32_t);
 void    md380_spiflash_enable();
 void    md380_spiflash_disable();
 void    md380_spiflash_wait();
+
+#endif

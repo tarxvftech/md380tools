@@ -6,6 +6,10 @@
 //  Details in the implementation; md380tools/applet/src/lcd_driver.h .
 //  
 
+#ifndef LCD_DRIVER_H
+#define LCD_DRIVER_H
+
+
 // Defines (macro constants, plain old "C"..) 
 
 #define LCD_SCREEN_WIDTH  160
@@ -166,4 +170,6 @@ int LCD_Printf( lcd_context_t *pContext, char *fmt, ... );
   // but with all goodies supported by tinyprintf .
 
 
+#endif
 /* EOF < md380tools/applet/src/lcd_driver.h > */
+

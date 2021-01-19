@@ -9,6 +9,10 @@
 //   from the codeplug / SPI-Flash or whatever .
 // Details in amenu_set_tg.c .
 
+#ifndef AMENU_SET_TG_H
+#define AMENU_SET_TG_H
+
+
 extern int     ad_hoc_call_type;
 extern int     ad_hoc_talkgroup;  // "wanted" talkgroup, set by user / alternative menu
 extern uint8_t ad_hoc_tg_channel; // current channel number when the above TG had been entered .
@@ -19,3 +23,4 @@ extern int  am_cbk_SetTalkgroup(app_menu_t *pMenu, menu_item_t *pItem, int event
 extern void CheckTalkgroupAfterChannelSwitch(void); // also in amenu_set_tg.c
 extern int am_cbk_SetCallType(app_menu_t *pMenu, menu_item_t *pItem, int event, int param);
 
+#endif
