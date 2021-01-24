@@ -15,6 +15,7 @@
 #include "addl_config.h"
 #include "beep.h"
 #include "debug.h"
+#include "display.h"
 #include "mbox.h"
 #include "os.h"
 
@@ -85,6 +86,7 @@ void beep9()
     bp_sempost2();
 }
 
+#if defined(FW_D13_020)
 static void start()
 {
     bp_sempost();
@@ -118,6 +120,7 @@ static void stop()
 {
     bp_sempost2();
 }
+#endif
 
 void bp_beep(uint8_t code)
 {
@@ -154,15 +157,20 @@ void * beep_OSMboxPend_hook(OS_EVENT *pevent, uint32_t timeout, int8_t *perr)
             case BEEP_TEST_3 :
                 bp_beep(3);
                 break ;
+            case 15:
+              if (gui_opmode3 == 3) {
+                // unprogrammed. kill unprogrammed channel boooo tone
+                return 0;
+              }
             default:
                 return ret ; 
         }
     }
 }
 
-static uint8_t beep_msg ; // it cannot live on the stack.
-
 #if defined(FW_D13_020) || defined(FW_S13_020)
+
+static uint8_t beep_msg ; // it cannot live on the stack.
 
 void bp_send_beep( uint8_t beep )
 {

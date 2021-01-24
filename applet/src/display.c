@@ -22,6 +22,21 @@
 #include "netmon.h"
 #include "radiostate.h"
 #include "unclear.h"
+#include "etsi.h"
+#include "app_menu.h"
+#include "syslog.h"        // LOGB()
+#include "irq_handlers.h"  // boot_flags, BOOT_FLAG_DREW_STATUSLINE
+#include "lcd_driver.h"
+
+#if defined(FW_D13_020) || defined(FW_S13_020)
+	#include "amenu_set_tg.h"
+	#include "codeplug.h"
+#else
+#warning old firmware
+#endif 
+
+//#include "amenu_channels.h"
+#include <stdlib.h>
 
 char eye_paltab[] = {
     0xd7, 0xd8, 0xd6, 0x00, 0x88, 0x8a, 0x85, 0x00, 0xe1, 0xe2, 0xe0, 0x00, 0xff, 0xff, 0xff, 0x00,
@@ -37,6 +52,7 @@ char eye_pix[] = {
 };
 const gfx_pal eye_pal = {14, 0, eye_paltab};
 const gfx_bitmap bmp_eye = {12, 12, 6, 4, eye_pix, &eye_pal, 0};
+int ch_ts = 0;				// 20180104 current channel TS 
 
 #ifdef FW_D13_020
 #define D_ICON_EYE_X 65
@@ -85,10 +101,35 @@ int intCentibel(long ampli)
     return (log_2 * 301 + 2) / 5 + fine[ampli];
 }
 
+#define RX_POPUP_Y_START 24
+#define RX_POPUP_X_START 10
+
+void draw_txt(char* testStr, int x, int y, char font){
+	char c=0;
+	int maxLen=16;
+	uint16_t fg_color = 0, bg_color = 0;
+#if defined(FW_D13_020) || defined(FW_S13_020)
+	Menu_GetColours(SEL_FLAG_NONE, &fg_color, &bg_color);
+#endif
+	while( ((c=*testStr)!=0)  && maxLen>0)
+	{ x = LCD_DrawCharAt( c, x, y, fg_color, bg_color, font);
+		//++i; // character index and limiting counter
+	    ++testStr; 
+		// (in rare cases, some of the leading text may be OVERWRITTEN below)
+		maxLen--;
+	}		 
+}
+
+int fDoOnce = 0;
+
 void draw_micbargraph()
 {
-    if( gui_opmode2 == OPM2_MENU ) {
-        // case for pressing the PTT during 'Manual Dial' in 'Contacts'
+    if( gui_opmode2 == OPM2_MENU
+# if (CONFIG_APP_MENU)
+            || Menu_IsVisible()
+#endif
+    ) {
+        // case for pressing the PTT during 'Manual Dial' in 'Contacts', or if 'app menu' is visible
         return ;
     }
     
@@ -186,7 +227,7 @@ void draw_micbargraph()
 
 void draw_rx_screen(unsigned int bg_color)
 {
-    int dst;
+    static int dst;
     int src;
     int grp ;
     
@@ -218,14 +259,92 @@ void draw_rx_screen(unsigned int bg_color)
         usr.state = "see README.md" ;
         usr.country = "on Github" ;
     }
-    
+
     int y_index = RX_POPUP_Y_START;
+    int scr_row = RX_POPUP_Y_START;
+
+    if ( global_addl_config.userscsv > 1 && talkerAlias.length > 0 )		// 2017-02-19 show Talker Alias depending on setup 0=CPS 1=DB 2=TA 3=TA & DB
+    {
+    	if( grp ) {
+	    if( global_addl_config.lh_tsstat == 0 ) {
+			gfx_printf_pos( RX_POPUP_X_START, scr_row, "%d->TG%d", src, dst );
+		} else {
+			gfx_printf_pos( RX_POPUP_X_START, scr_row, "%d->TS%d TG%d", src, lh_ts, dst );
+		}
+	} else {
+	    if( global_addl_config.lh_tsstat == 0 ) {
+			gfx_printf_pos( RX_POPUP_X_START, scr_row, "%d-> ID:%d", src, dst );
+		} else {
+	                gfx_printf_pos( RX_POPUP_X_START, scr_row, "%d->TS%d ID:%d", src, lh_ts, dst );
+		}
+	}
+	scr_row += GFX_FONT_SMALL_HEIGHT ;
+
+	gfx_select_font(gfx_font_norm);
+
+ 	if ( global_addl_config.userscsv > 1 && talkerAlias.length > 0 )		// 2017-02-19 show Talker Alias depending on setup 0=CPS 1=DB 2=TA 3=TA & DB
+ 	{    
+		gfx_printf_pos2(RX_POPUP_X_START, scr_row, 10, "%s", talkerAlias.text );
+ 	        scr_row += GFX_FONT_NORML_HEIGHT; // previous line was in big font
+ 	} else {
+		gfx_printf_pos2(RX_POPUP_X_START, scr_row, 10, "DMRID: %d", src );
+		scr_row += GFX_FONT_NORML_HEIGHT; // previous line was in big font
+ 	}
+
+	gfx_select_font(gfx_font_small);
+
+	switch( global_addl_config.userscsv ) {
+	        case 0 :
+		gfx_puts_pos(RX_POPUP_X_START, scr_row, "Userinfo: CPS mode");
+            	break ;
+	   
+		case 1 :
+		gfx_puts_pos(RX_POPUP_X_START, scr_row, "Userinfo: UserDB mode");
+            	break ;
+
+	        case 2 :
+		if ( talkerAlias.length > 0 )  {
+			gfx_puts_pos(RX_POPUP_X_START, scr_row, "Userinfo: TalkerAlias");
+		} else {
+			gfx_puts_pos(RX_POPUP_X_START, scr_row, "Userinfo: TA not rcvd!");
+		}
+            	break ;
+
+	        case 3 :
+		gfx_puts_pos(RX_POPUP_X_START, scr_row, "Userinfo: TA/DB mode");
+            	break ;
+	   }
+	   scr_row += GFX_FONT_SMALL_HEIGHT ; // previous line was in small font
+
+
+           gfx_select_font(gfx_font_small);
+           gfx_puts_pos(RX_POPUP_X_START, scr_row, "------------------------");
+           scr_row += GFX_FONT_SMALL_HEIGHT ;
+
+	   if( global_addl_config.userscsv == 3 )	// 3 = TA & DB
+	   {
+   	        gfx_printf_pos(RX_POPUP_X_START, scr_row, "%s %s", usr.callsign, usr.firstname );
+		scr_row += GFX_FONT_SMALL_HEIGHT ; // previous line was in small font
+
+		gfx_puts_pos(RX_POPUP_X_START, scr_row, usr.country );
+		scr_row += GFX_FONT_SMALL_HEIGHT ;
+ 	   }
+
+    } else {	
     
     gfx_select_font(gfx_font_small);
     if( grp ) {
-        gfx_printf_pos( RX_POPUP_X_START, y_index, "%d -> TG %d", src, dst );        
+	if( global_addl_config.lh_tsstat == 0 ) {
+		gfx_printf_pos( RX_POPUP_X_START, y_index, "%d->TG%d", src, dst );
+	} else {
+        	gfx_printf_pos( RX_POPUP_X_START, y_index, "%d->TS%d TG%d", src, lh_ts, dst );
+	}
     } else {
-        gfx_printf_pos( RX_POPUP_X_START, y_index, "%d -> %d", src, dst );
+	if( global_addl_config.lh_tsstat == 0 ) {
+        	gfx_printf_pos( RX_POPUP_X_START, y_index, "%d-> ID:%d", src, dst );
+	} else {
+        	gfx_printf_pos( RX_POPUP_X_START, y_index, "%d->TS%d ID:%d", src, lh_ts, dst );
+	}
     }
     y_index += GFX_FONT_SMALL_HEIGHT ;
 
@@ -234,7 +353,13 @@ void draw_rx_screen(unsigned int bg_color)
     y_index += GFX_FONT_NORML_HEIGHT; // previous line was in big font
     
     gfx_select_font(gfx_font_small);
-    gfx_puts_pos(RX_POPUP_X_START, y_index, usr.name );
+
+    if ( global_addl_config.userscsv > 1 && talkerAlias.length > 0 )		// 2017-02-19 show Talker Alias depending on setup 0=CPS 1=DB 2=TA 3=TA & DB
+    {	
+	gfx_puts_pos(RX_POPUP_X_START, y_index, talkerAlias.text );
+    } else {
+	gfx_puts_pos(RX_POPUP_X_START, y_index, usr.name );
+    }
     y_index += GFX_FONT_SMALL_HEIGHT ; // previous line was in small font
 
     gfx_puts_pos(RX_POPUP_X_START, y_index, usr.place );
@@ -245,11 +370,91 @@ void draw_rx_screen(unsigned int bg_color)
     
     gfx_puts_pos(RX_POPUP_X_START, y_index, usr.country );
     y_index += GFX_FONT_SMALL_HEIGHT ;
+    }
     
     gfx_select_font(gfx_font_norm);
     gfx_set_fg_color(0xff8032);
-    gfx_set_bg_color(0xff000000);
+    gfx_set_bg_color(0xff0000);
 }
+
+void draw_ta_screen(unsigned int bg_color)
+{
+    int dst;
+    int src;
+    int grp ;
+    
+    int primask = OS_ENTER_CRITICAL(); // for form sake
+    int scr_row = RX_POPUP_Y_START;
+    
+    dst = rst_dst ;
+    src = rst_src ;
+    grp = rst_grp ;
+    
+    OS_EXIT_CRITICAL(primask);
+ 
+    // clear screen
+    gfx_set_fg_color(bg_color);
+    gfx_blockfill(0, 16, MAX_X, MAX_Y); 
+
+    gfx_set_bg_color(bg_color);
+    gfx_set_fg_color(0x000000);
+    gfx_select_font(gfx_font_small);
+
+    user_t usr ;
+    
+    gfx_select_font(gfx_font_small);
+    if( grp ) {
+	if( global_addl_config.lh_tsstat == 0 ) {
+        	gfx_printf_pos( RX_POPUP_X_START, scr_row, "%d->TG%d", src, dst );
+	} else {
+        	gfx_printf_pos( RX_POPUP_X_START, scr_row, "%d->TS%d TG%d", src, lh_ts, dst );
+	}
+    } else {
+	if( global_addl_config.lh_tsstat == 0 ) {
+		gfx_printf_pos( RX_POPUP_X_START, scr_row, "%d->ID:%d", src, dst );
+	} else {
+		gfx_printf_pos( RX_POPUP_X_START, scr_row, "%d->TS%d ID:%d", src, lh_ts, dst );
+	}
+    }
+    scr_row += GFX_FONT_SMALL_HEIGHT ;
+
+    gfx_select_font(gfx_font_norm);
+
+    if ( global_addl_config.userscsv > 1 && talkerAlias.length > 0 )		// 2017-02-19 show Talker Alias depending on setup 0=CPS 1=DB 2=TA 3=TA & DB
+    {
+	gfx_printf_pos2(RX_POPUP_X_START, scr_row, 10, "%s", talkerAlias.text );
+        scr_row += GFX_FONT_NORML_HEIGHT;
+    } else {
+	gfx_printf_pos2(RX_POPUP_X_START, scr_row, 10, "DMRID: %d", src );
+	scr_row += GFX_FONT_NORML_HEIGHT;
+    }
+
+    gfx_select_font(gfx_font_small);
+    if ( talkerAlias.length > 0 )  {
+	gfx_puts_pos(RX_POPUP_X_START, scr_row, "Userinfo: TalkerAlias");
+    } else {
+	gfx_puts_pos(RX_POPUP_X_START, scr_row, "Userinfo: TA not rcvd!");
+    }
+
+    scr_row += GFX_FONT_SMALL_HEIGHT ;
+    gfx_select_font(gfx_font_small);
+    gfx_puts_pos(RX_POPUP_X_START, scr_row, "------------------------");
+    scr_row += GFX_FONT_SMALL_HEIGHT ;
+
+    if( usr_find_by_dmrid(&usr,src) == 1 || usr_find_by_dmrid(&usr,src) == 3 )
+    {
+        gfx_printf_pos(RX_POPUP_X_START, scr_row, "%s %s", usr.callsign, usr.firstname );
+	scr_row += GFX_FONT_SMALL_HEIGHT ;
+
+	gfx_puts_pos(RX_POPUP_X_START, scr_row, usr.country );
+	scr_row += GFX_FONT_SMALL_HEIGHT ;
+    }
+    
+    gfx_select_font(gfx_font_norm);
+    gfx_set_fg_color(0xff8032);
+    gfx_set_bg_color(0xff0000);
+}
+
 
 /*
 #include <stdlib.h>
@@ -272,18 +477,35 @@ int main(void)
 
 void draw_statusline_hook( uint32_t r0 )
 {
+   if( ! (boot_flags & BOOT_FLAG_DREW_STATUSLINE) )
+    { LOGB("t=%d: draw_stat\n", (int)IRQ_dwSysTickCounter ); // 4383(!) SysTicks after power-on
+    }
+   boot_flags |= BOOT_FLAG_DREW_STATUSLINE; // important for SysTick_Handler to know when we're "open for business" !
+
+# if (CONFIG_APP_MENU)
+    // If the screen is occupied by the optional 'red button menu', 
+    // update or even redraw it completely:
+    if( Menu_DrawIfVisible(AM_CALLER_STATUSLINE_HOOK) )  
+     { return; // the menu covers the entire screen, so don't draw anything else
+     }
+    // NOTE: draw_statusline_hook() isn't called when the squelch
+    //       is 'open' in FM, i.e. when the channel is BUSY .
+    //       -> call Menu_DrawIfVisible() from other places, too.
+# endif // CONFIG_APP_MENU ?
+
     if( is_netmon_visible() ) {
         con_redraw();
         return ;
     }
     draw_statusline( r0 );
 }
-
+	
 void draw_alt_statusline()
 {
-    int dst;
     int src;
-    int grp;
+    user_t usr;
+    user_t dst;
+    src = rst_src;
 
     gfx_set_fg_color(0);
     gfx_set_bg_color(0xff8032);
@@ -297,18 +519,58 @@ void draw_alt_statusline()
             mode = '!' ; // on other tg
         }
     }
-
-    user_t usr;
-    src = rst_src;
     
     if( src == 0 ) {
-        gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "lh:");
-    } else {    
-        if( usr_find_by_dmrid(&usr, src) == 0 ) {
-            gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "lh:%d->%d %c", src, rst_dst, mode);
-        } else {
-            gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "lh:%s->%d %c", usr.callsign, rst_dst, mode);
-        }	
+	if ( global_addl_config.datef == 5 )
+	{
+	        gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "lh:");
+	} else {
+	        gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "TA:");
+	}
+    } else {
+	if ( global_addl_config.datef == 6 && talkerAlias.length > 0 )				// 2017-02-18 show talker alias in status if rcvd valid
+	{
+		if( global_addl_config.lh_tsstat == 0 ) {
+			gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "TA:%s", talkerAlias.text);
+		} else {
+			gfx_printf_pos2(RX_POPUP_X_START - 7, 96, 157, "[%d] TA:%s", lh_ts, talkerAlias.text);
+		}
+	} else {										// 2017-02-18 otherwise show lastheard in status line
+										
+		switch ( usr_find_by_dmrid(&usr, src) ) {  					// lookup source DMRID from UserDB
+			case 0 :
+				if( usr_find_by_dmrid(&dst, rst_dst) != 0 ) {			// lookup destination DMRID from UserDB and show if found
+					if( global_addl_config.lh_tsstat == 0 ) {
+						gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "lh:%d->%s %c", src, dst.callsign, mode);
+					} else {
+						gfx_printf_pos2(RX_POPUP_X_START - 7, 96, 157, "[%d] lh:%d->%s %c", lh_ts, rst_src, dst.callsign, mode);
+					}
+				} else  {
+					if( global_addl_config.lh_tsstat == 0 ) {
+	        				gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "lh:%d->%d %c", src, rst_dst, mode);
+					} else {
+	        				gfx_printf_pos2(RX_POPUP_X_START - 7, 96, 157, "[%d] lh:%d->%d %c", lh_ts, rst_src, rst_dst, mode);
+					}
+				}
+				break;
+
+	    		case 1 : 
+		                if( usr_find_by_dmrid(&dst, rst_dst) != 0 ) {			// lookup destination DMRID from UserDB and show if found
+					if( global_addl_config.lh_tsstat == 0 ) {
+						gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "lh:%s->%s %c", usr.callsign, dst.callsign, mode);
+					} else {
+						gfx_printf_pos2(RX_POPUP_X_START - 7, 96, 157, "[%d] lh:%s->%d %c", lh_ts, usr.callsign, rst_dst, mode);
+					}
+		                } else  {
+					if( global_addl_config.lh_tsstat == 0 ) {
+						gfx_printf_pos2(RX_POPUP_X_START, 96, 157, "lh:%s->%d %c", usr.callsign, rst_dst, mode);
+					} else {
+						gfx_printf_pos2(RX_POPUP_X_START - 7, 96, 157, "[%d] lh:%s->%d %c", lh_ts, usr.callsign, rst_dst, mode);
+					}
+				}
+				break;
+		}
+	}
     }
     
     gfx_set_fg_color(0);
@@ -316,13 +578,339 @@ void draw_alt_statusline()
     gfx_select_font(gfx_font_norm);
 }
 
+#if defined(FW_D13_020) || defined(FW_S13_020)	
+void draw_adhoc_statusline()
+{
+//	int x = RX_POPUP_X_START + 36;							// 36=standard position aligned with channel info
+	int x = RX_POPUP_X_START + 35;
+//	int y = 55;									// 55=standard position from top
+	int y = 53;
+	int top_y = 17;									// upper status below fw statusline
+
+	gfx_set_fg_color(0x000000);
+	gfx_set_bg_color(0xff8032);
+	gfx_select_font(gfx_font_small);
+
+	char top_status[25];								// top status line
+	char bot_status[25];								// bottom status line
+
+	char ch_rx[12];
+	char ch_tx[12];
+	char freq_rx[12];
+	char freq_tx[12];
+
+//	char ch_mode[3];								// DMR / FM / FM-N / FM-W
+//	char ch_wide[2];								// DMR / FM / FM-N / FM-W
+//	char ch_rpt[4];									// [-R] / [+R] repeater shift
+//	char dmr_cc[2];									// [CC1] color code
+//	char dmr_compact[5];								// [1|2| ... CC/TS prefix
+	char ch_offset[5];								// repeater offset
+//	char ch_tmp[10];								// temp
+//	char ch_cc[1];									// temp CC
+
+	char fm_bw_stat[3];								// |N or |W
+	char mic_gain_stat[5];								// off, 3dB, 6dB
+	char fm_sql[4];									// CTS oder DCS
+	char tg_fill[7];								// talkgroup space filler
+
+	char ch_tone_type[2];								// N=none D=DCS 0-9=CTS
+//	long ch_rxfreq = 0;
+//	long ch_txfreq = 0;
+//	float ch_freqoff = 0;
+
+	strncpy(ch_rx, current_channel_info_E.rxFreq.text, 12);				// read RX frequency from codeplug
+	strncpy(ch_tx, current_channel_info_E.txFreq.text, 12);				// read TX frequency from codeplug
+
+	strncpy(freq_rx, current_channel_info_E.rxFreq.text, 12);				// read RX frequency from codeplug
+	strncpy(freq_tx, current_channel_info_E.txFreq.text, 12);				// read TX frequency from codeplug
+
+	//strcat(ch_rx, '\0');
+	//strcat(ch_tx, '\0');
+
+	strncpy(ch_tone_type, current_channel_info_E.EncTone.text, 1);
+	ch_tone_type[1] = '\0';
+
+//	ch_rxfreq = atol(ch_rx);
+//	ch_txfreq = atol(ch_tx);
+	//sprintf(ch_rxfreq, ch_rx);
+	//sprintf(ch_txfreq, ch_tx);
+
+//	ch_freqoff = ((ch_rxfreq - ch_txfreq) / 100000);
+
+	user_t usr;									// reference user DB
+	
+     channel_info_t *ci = &current_channel_info ;
+     BOOL fIsWideBandwidth = ( ci->mode >> 3 ) & 0x1 ;
+    
+	//========================================================================================================================//
+	// First build general mode independent status info 				// RPT shift and Mic gain
+	//========================================================================================================================//
+
+	if (strcmp(ch_rx, ch_tx) == 0) {
+		if (global_addl_config.mode_stat != 3) {				// if MODE/CC compact display set in config
+			strcpy(ch_offset, "|   ");
+		} else {
+			strcpy(ch_offset, "|  ");
+		}
+	} else if (strcmp(ch_rx, ch_tx) > 0) {
+		if (global_addl_config.mode_stat != 3) {				// if MODE/CC compact display set in config
+			strcpy(ch_offset, "|-R|");
+		} else {
+			strcpy(ch_offset, "|-R");
+		}
+	} else {
+		if (global_addl_config.mode_stat != 3) {				// if MODE/CC compact display set in config
+			strcpy(ch_offset, "|+R|");
+		} else {
+			strcpy(ch_offset, "|+R");
+		}
+	}
+
+	if (global_addl_config.mode_stat > 1) {						// if MODE/CC/gain display set in config for both modes (DMR/FM)
+		if (global_addl_config.mic_gain == 0) {
+			strcpy(mic_gain_stat, "|0dB");
+		} else if (global_addl_config.mic_gain == 1) {
+			strcpy(mic_gain_stat, "|3dB");
+		} else if (global_addl_config.mic_gain == 2) {
+			strcpy(mic_gain_stat, "|6dB");
+		}
+	} else {
+		strcpy(mic_gain_stat, "    ");						// blank if now mic gain display status selected
+        }
+
+//	BOOL fIsAnalog = current_channel_info_E.bIsAnalog;
+	BOOL fIsDigital = current_channel_info_E.bIsDigital;
+     BOOL fIsCTSvalid = (strlen(current_channel_info_E.EncTone.text) <= 6 );
+
+	// the top statusline is build by the following strings:
+	// -----------------------------------------------------
+	//      |         DMR  |-R|
+	//      |         DMR |-R[1|2|2623445]  --- [n|n|   = 5 DMR compact mode
+	//      |         DMR  |-R| [CC1]
+	//      |         FM |N|-R| [CTS]
+	//      |         FM |N|-R| [DCS]
+	//                 !  !  !    !
+	//                 !  !  !    ! 
+	//                 !  !  !    +------------- [CCn]    = 5
+	//                 !  !  +------------------ |-R|     = 4
+	//                 !  +--------------------- |N or |W = 2
+	//                 +------------------------ Mode     = 3
+
+	//========================================================================================================================//
+	if (!fIsDigital) {								// DMR channel active
+	//========================================================================================================================//
+		int ch_cc = current_channel_info_E.CC;					// current color code
+		ch_ts = current_channel_info_E.Slot;					// current timeslot
+		int tgNum = (ad_hoc_tg_channel ? ad_hoc_talkgroup : current_TG());	// current talkgroup
+		int callType = (ad_hoc_tg_channel ? ad_hoc_call_type : contact.type);	// current calltype
+		//sprintf(dmr_cc, ch_cc);
+
+		// build the top statusline -------------------------------------------------------------------
+		if (global_addl_config.mode_stat != 3) {				// if MODE/CC compact display set in config
+		strcpy(top_status, "DMR  ");						// init DMR string
+		} else {
+		strcpy(top_status, "DMR");						// init DMR string compact
+		}
+
+		strcat(top_status, ch_offset);						// DMR + repeaterstatus
+
+		if (global_addl_config.mode_stat != 3) {				// if MODE/CC compact display set in config
+			strcat(top_status, " [CC");					// DMR [-R] [CCn]
+		} else {
+			strcat(top_status, "[");					// DMR [-R] [CCn] in compact mode
+		}
+
+		// build some spaces between [CC|TS|TG] and db-Status -----------------------------------------
+		if (tgNum > 999999) {
+			strcpy(tg_fill, "");
+		} else if (tgNum > 99999) {
+			strcpy(tg_fill, "");
+		} else if (tgNum > 9999) {
+			strcpy(tg_fill, "");
+		} else if (tgNum > 999) {
+			strcpy(tg_fill, "");
+		} else if (tgNum > 99) {
+			strcpy(tg_fill, "");
+		} else if (tgNum > 9) {
+			strcpy(tg_fill, " ");
+		} else {
+			strcpy(tg_fill, "  ");
+		}
+
+		// ... the remaining info about DCS/CTS/CC is build dynamically during output
+
+		// build the bottom statusline ----------------------------------------------------------------
+		strcpy(bot_status, "TS:");						// init bottom string
+		// ... the remaining info about TG/adhoc TG/private ID is build dynamically during output
+
+
+		if (global_addl_config.mode_stat != 0) { 
+			if (global_addl_config.mode_color == 1) { gfx_set_fg_color(0xffffff); gfx_set_bg_color(0xff4f32);}
+				if (global_addl_config.mode_stat != 3) {					// if MODE/CC compact display set in config
+					gfx_printf_pos2(x, top_y, 120, "%s%d]%s ", top_status, ch_cc, mic_gain_stat);
+				} else {
+					gfx_printf_pos2(x, top_y, 120, "%s%d|%d|%s%s%d]%s%s   ", top_status, ch_cc, ch_ts, (ad_hoc_tg_channel ? "A":""), (callType == CONTACT_GROUP || callType == CONTACT_GROUP2 ? "" : "P"), tgNum, tg_fill, mic_gain_stat);
+				}
+			gfx_set_fg_color(0x000000);
+			gfx_set_bg_color(0xff8032);
+		}
+
+		if (global_addl_config.chan_stat != 0) {
+  		    if (usr_find_by_dmrid(&usr, tgNum) == 0) {
+			if (global_addl_config.chan_color == 1) { gfx_set_fg_color(0x261162); gfx_set_bg_color(0xff9f32);}
+
+			if (global_addl_config.chan_stat == 1) {						// show TS / TG / CTS / DCS status
+				if (global_addl_config.mode_stat != 3) {					// if MODE/CC compact display set in config 
+					gfx_printf_pos2(x, y, 120, "%s%d %s%s:%d          ", bot_status, ch_ts, (ad_hoc_tg_channel ? "Ad" : ""), (callType == CONTACT_GROUP || callType == CONTACT_GROUP2 ? "TG" : "Priv"), tgNum);
+				} else {
+					if (global_addl_config.chan_stat != 4) {		// top=compact - bottom not rx/tx, so show rx, or if 3 = tx
+						gfx_printf_pos2(x, y, 120, "%s:%s MHz   ", (global_addl_config.chan_stat == 3 ? "TX" : "RX"), (global_addl_config.chan_stat == 3 ? freq_tx : freq_rx) );
+					} else {
+
+						gfx_printf_pos2(x, y, 120, "%s:%s MHz   ", "RX", freq_rx );
+						gfx_printf_pos2(x, y + 10, 120, "%s:%s MHz   ", "TX", freq_tx);
+					}
+				}
+			} else {
+				if (global_addl_config.chan_stat != 4) {
+					//gfx_printf_pos2(x, y, 120, "%s:%s MHz   ", (global_addl_config.chan_stat == 3 ? "TX" : "RX"), (global_addl_config.chan_stat == 3 ? ch_tx : ch_rx) );
+					gfx_printf_pos2(x, y, 120, "%s:%s MHz   ", (global_addl_config.chan_stat == 3 ? "TX" : "RX"), freq_rx );
+				} else {
+
+					gfx_printf_pos2(x, y, 120, "%s:%s MHz   ", "RX", freq_rx );
+					gfx_printf_pos2(x, y + 10, 120, "%s:%s MHz   ", "TX", freq_tx);
+				}
+			}
+
+		    } else {
+			if (global_addl_config.chan_color == 1) { gfx_set_fg_color(0x261162); gfx_set_bg_color(0xff9f32);}
+			if (global_addl_config.chan_stat == 1) { 
+				//gfx_printf_pos2(x, y, 320, "%s - %s", (ad_hoc_call_type == CONTACT_GROUP ? "TG" : "Priv"), usr.callsign);
+				gfx_printf_pos2(x, y, 120, "%s%d %s%s:%s          ", bot_status, ch_ts, (ad_hoc_tg_channel ? "Ad" : ""), (callType == CONTACT_GROUP || callType == CONTACT_GROUP2 ? "TG" : "Priv"), usr.callsign);
+			} else {
+					if (global_addl_config.chan_stat < 4) {
+						gfx_printf_pos2(x, y, 120, "%s:%s MHz   ", (global_addl_config.chan_stat == 3 ? "TX" : "RX"), (global_addl_config.chan_stat == 3 ? freq_tx : freq_rx) );
+					} else {
+						gfx_printf_pos2(x, y, 120, "RX:%s MHz   ", freq_rx );
+						gfx_printf_pos2(x, y + 10, 120, "TX:%s MHz   ", freq_tx );
+					}
+			}
+		    }
+		}
+	//========================================================================================================================//
+	}	 				// analog channel active
+	//========================================================================================================================//
+	else {
+		if ( *ch_tone_type == 'N') {
+			strcpy(fm_sql, "Off");
+			strcpy(bot_status, "TX:");					// init bottom string
+			strcat(bot_status, ch_tx);					// concat tx frequency
+			strcat(bot_status, "MHz");
+			strcpy(tg_fill, "   ");
+		} else if ( *ch_tone_type == 'D')  {
+			strcpy(fm_sql, "DCS");
+			strcpy(bot_status, fm_sql);					// init bottom string
+			strcat(bot_status, ":");
+			strcat(bot_status, current_channel_info_E.EncTone.text);	// add DCS code
+			strcpy(tg_fill, "");
+		} else {
+               if (! fIsCTSvalid ) {		
+				strcpy(fm_sql, "");			
+				strcpy(bot_status, fm_sql);
+			} else {	
+				strcpy(fm_sql, "CTS");
+				strcpy(bot_status, fm_sql);					// init bottom string
+				strcat(bot_status, ":");
+				strcat(bot_status, current_channel_info_E.EncTone.text);	// add CTS tone freq
+				strcat(bot_status, "Hz");					// add CTS tone freq
+			}
+			strcpy(tg_fill, "");
+		}
+
+		if (global_addl_config.mode_stat != 3) {				// if MODE/CC compact display set in config
+			strcpy(top_status, "FM ");					// init FM string
+		} else {
+			strcpy(top_status, "FM");					// init FM string
+		}
+		if (fIsWideBandwidth) { strcpy(fm_bw_stat, "|W"); } else { strcpy(fm_bw_stat, "|N"); }
+
+		strcat(top_status, fm_bw_stat);						// |N or |W
+		strcat(top_status, ch_offset);						// |-R| or |=>| simplex
+
+		if (global_addl_config.mode_stat != 3) {				// if MODE/CC compact display set in config
+			strcat(top_status, " [");					// space
+			strcat(top_status, fm_sql);					// add the tone type to status
+		} else {	
+			if (*ch_tone_type != 'N') {					// if MODE/CC compact display set in config
+				if (fIsCTSvalid) {
+					strcat(top_status, "[");					// less space in compact mode
+					strcat(top_status, fm_sql);					// add the tone type to status
+					strcat(top_status, ":");
+					strcat(top_status, current_channel_info_E.EncTone.text);// add DCS/CTS tone to topstatus in compact mode
+				}
+			}
+		}
+
+		strcat(top_status, "]");						// Tone squelch status close bracket
+	
+		if (global_addl_config.mode_stat != 0) { 
+			if (global_addl_config.mode_color == 1) { gfx_set_fg_color(0xffffff); gfx_set_bg_color(0xff4f32);}
+			gfx_printf_pos2(x, top_y, 120, "%s%s%s    ", top_status, tg_fill, mic_gain_stat);
+			gfx_set_fg_color(0x000000);
+			gfx_set_bg_color(0xff8032);
+		}
+
+		if (global_addl_config.chan_stat != 0) { 
+			if (global_addl_config.chan_color == 1) { gfx_set_fg_color(0x261162); gfx_set_bg_color(0xff9f32);}
+
+				if (global_addl_config.chan_stat == 1) { 		// 1=show Status CC/CTS/DCS Info
+					if (global_addl_config.mode_stat != 3) {	// if MODE/CC compact display set in config
+						gfx_printf_pos2(x, y, 120, "%s                  ", bot_status);
+					} else {
+						if (global_addl_config.chan_stat != 4) {
+							gfx_printf_pos2(x, y, 120, "%s:%s MHz     ", (global_addl_config.chan_stat == 3 ? "TX" : "RX"), (global_addl_config.chan_stat == 3 ? freq_tx : freq_rx) );
+						} else {
+							gfx_printf_pos2(x, y, 120, "RX:%s MHz     ", freq_rx );
+							gfx_printf_pos2(x, y + 10, 120, "TX:%s MHz     ", freq_tx );
+						}
+					}
+				} else {
+					if (global_addl_config.chan_stat != 4) {
+						gfx_printf_pos2(x, y, 120, "%s:%s MHz     ", (global_addl_config.chan_stat == 3 ? "TX" : "RX"), (global_addl_config.chan_stat == 3 ? freq_tx : freq_rx) );
+					} else {
+						gfx_printf_pos2(x, y, 120, "RX:%s MHz     ", freq_rx );
+						gfx_printf_pos2(x, y + 10, 120, "TX:%s MHz     ", freq_tx );
+					}
+				}
+			}
+		}
+	//========================================================================================================================//
+	gfx_set_fg_color(0x000000);
+	gfx_set_bg_color(0xff0000);
+	gfx_select_font(gfx_font_norm);
+}
+#endif
+
+
+
+
 void draw_datetime_row_hook()
 {
+# if (CONFIG_APP_MENU)
+    if( Menu_DrawIfVisible(AM_CALLER_DATETIME_HOOK) )  
+     { return; // the menu covers the entire screen, so don't draw anything else
+     }
+# endif
+
+
 #if defined(FW_D13_020) || defined(FW_S13_020)
     if( is_netmon_visible() ) {
         return ;
     }
-    if( is_statusline_visible() ) {
+    //if( global_addl_config.mode_stat != 0 || global_addl_config.chan_stat != 0 ) {
+	draw_adhoc_statusline(); 
+    //}
+    if( is_statusline_visible() || global_addl_config.datef == 6 ) {
         draw_alt_statusline();
         return ; 
     }

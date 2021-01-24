@@ -2,12 +2,12 @@
 
 ## Preparing build environment ##
 
-####Debian Stretch:####
+#### Debian Stretch: ####
 
     apt-get install gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
-                    libusb-1.0 python-usb make curl
+                    libusb-1.0 python-usb python-requests make curl
 
-####Debian Jessie (using backports.debian.org):####
+#### Debian Jessie (using backports.debian.org): ####
 
 Add backports to your sources.list
 
@@ -23,11 +23,11 @@ Install python-usb from backports, the rest from Jessie
 
      apt -t jessie-backports install python-usb
      apt install gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
-                 libusb-1.0 make curl
+                 libusb-1.0 make curl python-requests
 
-####Debian Jessie (using python-pip):####
+#### Debian Jessie (using python-pip): ####
 
     apt-get install gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
-            libusb-1.0 git make curl python-pip unzip make curl
+            libusb-1.0 git python-pip unzip make curl
     pip install pyusb -U # update PyUSB to 1.0
   

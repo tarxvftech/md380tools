@@ -19,11 +19,16 @@
 #include "usersdb.h"
 #include "display.h"
 #include "dmr.h"
+#include "dmesg.h"
 #include "console.h"
 #include "util.h"
 #include "debug.h"
 #include "netmon.h"
 #include "syslog.h"
+#include "irq_handlers.h"
+#include "narrator.h"
+#include "app_menu.h"
+#include "system_hrc5000.h"
  
 //static int flag=0;
 
@@ -41,12 +46,25 @@
 
 extern void f_4315_hook()
 {
+#  if( CONFIG_MORSE_OUTPUT ) 
+    narrate(); // may "tell a story" in Morse code (for visually impaired hams).
+               // don't seem get here while in the alternative menu (app_menu.c).
+#  endif
+
+#  if( CONFIG_APP_MENU ) 
+    if( Menu_DrawIfVisible(AM_CALLER_F_4315_HOOK) )  
+     { return; // the menu covers the entire screen, so don't draw anything else
+     }
+#  endif // CONFIG_APP_MENU ?
+
     netmon_update();
     con_redraw();
+
+
     if( is_netmon_visible() ) {
         return ;
     }
-    F_4315();
+    F_4315(); // this seems to be Tytera's own "painter" for update_scr_17.
 }
 
 //// this hook switcht of the exit from the menu in case of RX
@@ -80,31 +98,61 @@ extern void f_4315_hook()
 
 void rx_screen_blue_hook(char *bmp, int x, int y)
 {
+  // green_led_timer = 5; // rx_screen_blue_hook() called ? very short pulse with the green LED !
+
     netmon_update();
+
+#if( CONFIG_MORSE_OUTPUT ) 
+    narrate(); // continue "telling a story" in Morse code
+#endif
+
+#  if( CONFIG_APP_MENU ) 
+    if( Menu_DrawIfVisible(AM_CALLER_RX_SCREEN_BLUE_HOOK) )  
+     { return; // the menu covers the entire screen, so don't draw anything else
+     }
+#  endif // CONFIG_APP_MENU ?
+
 #ifdef CONFIG_GRAPHICS
-    if( global_addl_config.userscsv == 1 && !is_menu_visible() ) {
-        draw_rx_screen(0xff8032);
+    if( global_addl_config.userscsv > 0 && !is_menu_visible() ) {
+      if( global_addl_config.userscsv == 2) {
+           draw_rx_screen(0xff8032);      // ta
+      } else {
+           draw_rx_screen(0xff8032);
+      }
     } else {
         gfx_drawbmp(bmp, x, y);
     }
 #endif //CONFIG_GRAPHICS
+
 }
 
 void rx_screen_gray_hook(void *bmp, int x, int y)
 {
     netmon_update();
+
+#  if( CONFIG_MORSE_OUTPUT ) 
+    narrate(); // continue "telling a story" in Morse code
+#  endif
+
+#  if( CONFIG_APP_MENU ) 
+    if( Menu_DrawIfVisible(AM_CALLER_RX_SCREEN_GRAY_HOOK) )  
+     { return; // the menu covers the entire screen, so don't draw anything else
+     }
+#  endif // CONFIG_APP_MENU ?
+
 #ifdef CONFIG_GRAPHICS
-    if( global_addl_config.userscsv == 1 && !is_menu_visible() ) {
-        draw_rx_screen(0x888888);
+    if( global_addl_config.userscsv > 0 && !is_menu_visible() ) {
+       if( global_addl_config.userscsv == 2) {
+           draw_rx_screen(0x888888);      // ta
+       } else {
+           draw_rx_screen(0x888888);
+       }
     } else {
         gfx_drawbmp(bmp, x, y);
     }
 #endif //CONFIG_GRAPHICS
+
 }
-
-
-
-
 
 
 // Lab hooks - for training only :)
@@ -124,11 +172,11 @@ extern void gui_control_hook( int r0 );
     
 void f_4520_hook()
 {
-        {
-            uint32_t *p = 0x2001e6bc ;
-//            *p = 0x00080001 ;
-            *p = 0x0 ;
-        }
+   {
+      uint32_t *p = (uint32_t*)0x2001e6bc;
+//    *p = 0x00080001 ;
+      *p = 0x0 ;
+   }
 //    void *return_addr;
 //    void *sp;
 //    __asm__("mov %0,r14" : "=r" (return_addr));
@@ -229,7 +277,9 @@ void trace_gui_opmode1()
         return ;
     }
     if( old != new ) {
+#if defined CONFIG_KEYBTRACE
         PRINT( "mode1: %d -> %d (%d)\n", old, new, upd );
+#endif
         old = new ;
     }
 }
@@ -239,9 +289,14 @@ void trace_gui_opmode2()
     static int old = -1 ;
     int new = gui_opmode2 ;
     if( old != new ) {
+#if defined CONFIG_KEYBTRACE
         PRINT( "mode2: %d -> %d\n", old, new );
+#endif
         LOGG( "mode2: %d -> %d\n", old, new );
         old = new ;
+#      if( CONFIG_MORSE_OUTPUT ) 
+        narrate(); // may begin to "tell a different story" in Morse code (?)
+#      endif
     }
 }
 
@@ -254,6 +309,9 @@ void trace_gui_opmode3()
         PRINT( "mode3: %d -> %d\n", old, new );
         LOGG( "mode3: %d -> %d\n", old, new );
         old = new ;
+#      if( CONFIG_MORSE_OUTPUT ) 
+        narrate(); // "say what's going on" (gui_opmode3 related ?)
+#      endif
     }
 }
 #else
@@ -261,6 +319,8 @@ void trace_gui_opmode3()
 {
 }
 #endif
+
+static int rtc_hook_timer = 0;
 
 void f_4225_hook()
 {
@@ -273,6 +333,7 @@ void f_4225_hook()
     
     static int old = -1 ;
     int new = gui_opmode1 & 0x7F ;
+
     if( old != new ) {
         if( gui_opmode2 == OPM2_MENU ) {
             // menu is showing.
@@ -286,14 +347,48 @@ void f_4225_hook()
             old = new ;
         }
     }
-    
+
     if ( global_addl_config.micbargraph == 1 ) {
         if( !is_netmon_visible() ) {
             draw_micbargraph();
         }
     }
-    
+    rtc_hook_timer++;
+	
+    if ( global_addl_config.mic_gain > 0 && rtc_hook_timer==30) {
+	if(global_addl_config.mic_gain==1){
+		c5000_spi0_writereg( 0x0F, 0xD8);
+	}
+	else if(global_addl_config.mic_gain==2){
+		c5000_spi0_writereg( 0x0F, 0xE8);
+	}
+    }
+
+    if ( rtc_hook_timer%150==0 && !IS_PTT_PRESSED) {
+	hrc5000_check();		// check FM registers (BPF, compression, pre-emphasis, bandwith)
+    }
+	
+    if ( rtc_hook_timer%111==0 && !IS_PTT_PRESSED) {
+	hrc5000_dev_set();		// set FM deviation level (default=0, user=1-5)
+    }
+
+    if(rtc_hook_timer >= 200)
+	rtc_hook_timer=0;
+
     netmon_update();
+
+#  if( CONFIG_MORSE_OUTPUT ) 
+    narrate(); // "tell what's going on" (after change in gui_opmode*)
+#  endif
+
+#  if( CONFIG_APP_MENU ) 
+    if( Menu_DrawIfVisible(AM_CALLER_F_4225_HOOK) )  
+     { return; // THIS call made the 'App Menu' work on a busy FM channel
+       // (when Tytera doesn't paint anything to camouflage the QRM
+       //  caused by traffic on the 8-bit LCD interface / connector cable) 
+     }
+#  endif // CONFIG_APP_MENU ?
+
 
 #if 0
     int upd = gui_opmode1 > 0x7F ;
@@ -312,7 +407,7 @@ void f_4225_hook()
     
     if( is_netmon_visible() ) {
         
-        // steer back to idle screen, because thata the most intercepted.
+        // steer back to idle screen, because that's the most intercepted.
         if( gui_opmode2 == OPM2_VOICE ) {
             gui_opmode2 = OPM2_IDLE;
         }
@@ -329,5 +424,12 @@ void gui_control_hook( int r0 )
     gui_control( r0 );
 //    PRINT("-> %d\n", r0 );
 //    return r0 ;
+
+#  if( CONFIG_MORSE_OUTPUT ) 
+    narrate(); // not sure what gui_control_hook() actually does, but
+               // if won't hurt to let the "CW storyteller" take a look
+               // at the current values in gui_opmode_x again. (?)
+#  endif
+
 }
 #endif

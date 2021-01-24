@@ -124,6 +124,8 @@ typedef struct lc {
 
 void dump_full_lc( lc_t *lc );
 
+void decode_ta( lc_t *lc );
+
 inline uint8_t get_flco( lc_t *lc )
 {
     return lc->pf_flco & 0x3f ;
@@ -155,7 +157,7 @@ struct TAContext
   char text[28];
 };
 
-struct TAContext taContext;
+extern struct TAContext taContext;
 extern struct TAContext talkerAlias;
 
 #ifdef __cplusplus
@@ -163,4 +165,3 @@ extern struct TAContext talkerAlias;
 #endif
 
 #endif /* ETSI_H */
-

@@ -79,6 +79,12 @@ class Tool(DFU):
     """Client class for extra features patched into the MD380's firmware.
     None of this will work with the official firmware, of course."""
 
+    def __init__(self, device, alt):
+        super(Tool, self).__init__(device, alt)
+        # We need to read the manufacturer string to hook the added USB functions
+        # Some systems (Raspian Jessie) don't have this property
+        getattr(device, "manufacturer")
+
     def drawtext(self, str, a, b):
         """Sends a new MD380 command to draw text on the screen.."""
         cmd = 0x80  # Drawtext
@@ -96,6 +102,39 @@ class Tool(DFU):
             print("Failed to send custom %02x %02x." % (a, b))
             return False
         return True
+
+    def read_framebuf_line(self, y):
+        """Reads a single line of pixels from the framebuffer."""
+        # simple test - the firmware can also send larger tiles.
+        nloops = 0
+        while nloops<3:
+           cmdstr = (chr(0x84) + # TDFU_READ_FRAMEBUFFER
+                  chr(0) +    # x1 (x1,y1) = tile's upper left corner
+                  chr(y) +    # y1
+                  chr(159) +  # x2 (x2,y2) = tile's lower right corner
+                  chr(y)      # y2
+                  )
+           self._device.ctrl_transfer(0x21, Request.DNLOAD, 1, 0, cmdstr)
+           self.get_status()  # this changes state
+           status = self.get_status()  # this gets the status
+           # read 5-byte header (echo of cmdstr) followed by
+           # 160 pixels per line * 3 bytes per pixel (BLUE,GREEN,RED):
+           rd_result = self.upload(1, 160*3+5, 0);
+           if rd_result[4] == y:  # y2 ok -> got the expected response
+             return rd_result[5:] # strip the header, return pixel data only
+           nloops = nloops+1 # try again, up to 3 times...
+           time.sleep(0.01)  # about 10 ms later
+        return "" # error -> empty result
+
+    def send_keyboard_event(self, key_ascii, pressed_or_released ):
+        """Sends a keyboard event to remotely control an MD380."""
+        cmdstr = ( chr(0x85) + # TDFU_REMOTE_KEY_EVENT
+                   key_ascii + # 2nd arg: single char 'M'(enu), 'U'(p), 'D'(own), 'B'(ack), etc
+                   chr(pressed_or_released) ) # 2nd arg: pressed (1) or released (0)
+        self._device.ctrl_transfer(0x21, Request.DNLOAD, 1, 0, cmdstr )
+        self.get_status()  # this changes state
+        time.sleep(0.05)
+        status = self.get_status()  # this gets the status
 
     def peek(self, adr, size):
         """Returns so many bytes from an address."""
@@ -242,6 +281,15 @@ class Tool(DFU):
         # time.sleep(0.1);
         status = self.get_status()  # this gets the status
 
+    def reboot_to_bootloader(self):
+        """Reboot into the bootloader with a DFU command.
+        This will erase (part of) the firmware from flash,
+        so you must reprogram the firmware afterwards if you'd like a working radio.
+        """
+        cmd = 0x86  # reboot_to_bootloader
+        self._device.ctrl_transfer(0x21, Request.DNLOAD, 1, 0, chr(cmd))
+        self.get_status()  # this changes state
+
     def getdmesg(self):
         """Returns the 1024 byte DMESG buffer."""
         cmd = 0x00  # DMESG
@@ -356,7 +404,6 @@ def dmesg(dfu):
     # dfu.drawtext("Dumping dmesg",160,50);
     print(dfu.getdmesg())
 
-
 def parse_calibration(dfu):
     dfu.md380_custom(0xA2, 0x05)
     data = str(bytearray(dfu.upload(0, 512)))
@@ -374,6 +421,37 @@ def coredump(dfu, filename):
             buf = dfu.peek(adr, 1024)
             f.write(buf)
         f.close()
+
+def screenshot(dfu, filename="screenshot.bmp"):
+    """Reads the LCD framebuffer"""
+    with open(filename, 'wb') as f:
+      # Write a simple, hard-coded bitmap file header
+      #  (14 byte "file header" + 40 byte "info block" + 3*160*128 byte "data",
+      #   total size = 0x0000F036 bytes. Here written in little endian format:
+      f.write( "BM" + chr(0x36)+chr(0xF0)+chr(0x00)+chr(0x00)
+                    + chr(0x00)+chr(0x00)+chr(0x00)+chr(0x00)
+                    + chr( 54 )+chr(0x00)+chr(0x00)+chr(0x00) )
+      # Next: Write the "bitmap info header". Keep it simple, use 40 bytes.
+      f.write( chr( 40 )+chr(0x00)+chr(0x00)+chr(0x00) ) # sizeof(BITMAPINFOHEADER)
+      f.write( chr( 160)+chr(0x00)+chr(0x00)+chr(0x00) ) # width (pixel)
+      f.write( chr( 128)+chr(0x00)+chr(0x00)+chr(0x00) ) # height (pixel)
+      f.write( chr( 1  )+chr(0x00) ) # number of bitplanes (anachronism)
+      f.write( chr( 24 )+chr(0x00) ) # number of bits per pixel
+      f.write( chr(0x00)+chr(0x00)+chr(0x00)+chr(0x00) ) # no compression
+      f.write( chr(0x00)+chr(0xA0)+chr(0x00)+chr(0x00) ) # sizeof(pixel data)
+      f.write( chr(0x00)+chr(0x00)+chr(0x00)+chr(0x00) ) # X pixel per meter
+      f.write( chr(0x00)+chr(0x00)+chr(0x00)+chr(0x00) ) # P pixel per meter
+      f.write( chr(0x00)+chr(0x00)+chr(0x00)+chr(0x00) ) # no colour palette
+      f.write( chr(0x00)+chr(0x00)+chr(0x00)+chr(0x00) ) # number of colours "used" : 0 = all
+      # Write image data with 160 pixels per line, 3 bytes per pixel.
+      # For a start, just dump the pixels to the file unmodified.
+      y = 127; # bmp files begin with the 'bottom line' (y=127)
+      while y>=0:
+        buf = dfu.read_framebuf_line(y)
+        f.write(buf)
+        y = y-1;
+      f.close()
+
 
 
 def hexdump(dfu, address, length=512):
@@ -431,7 +509,7 @@ def flashgetid(dfu):
     elif buf[0] == 0x70 and buf[1] == 0xf1 and buf[2] == 0x01:
         sys.stdout.write("Bad LibUSB connection.  Please see the advice from N6YN at https://github.com/travisgoodspeed/md380tools/issues/186\n")
     else:
-        sys.stdout.write("Unkown SPI Flash - please report\n")
+        sys.stdout.write("Unknown SPI Flash - please report\n")
     return size
 
 
@@ -654,6 +732,9 @@ Dumps all the inbound and outbound text messages.
 Dumps all the keys.
     md380-tool keys
 
+Dump a screenshot.
+    md380-tool screenshot <filename.bmp>
+
 Prints the SPI Flash Type.
     md380-tool spiflashid
 Dump all of flash memory.
@@ -670,8 +751,10 @@ Dump one word.
     md380-tool readword <0xcafebabe>
 Dump 1kB from arbitrary address
     md380-tool dump <filename.bin> <address>
-Dump calibration data 
+Dump calibration data
     md380-tool calibration
+Reboot into the bootloader (erases application, you _must_ reflash firmware afterwards):
+    md380-tool reboot_to_bootloader
 
 Copy File to SPI flash.
     md380-tool spiflashwrite <filename> <address>"
@@ -705,6 +788,13 @@ def main():
             #             elif sys.argv[1] == 'channel':
             #                 dfu=init_dfu();
             #                 getchannel(dfu);
+            elif sys.argv[1] == "reboot_to_bootloader":
+                dfu = init_dfu()
+                print("It's okay to get a pipe error here, "
+                "as long as it reboots into bootloader and "
+                "has the red/green alternating LED.")
+                dfu.reboot_to_bootloader()
+                print("Now go reflash your firmware!")
             elif sys.argv[1] == 'c5000':
                 dfu = init_dfu()
                 c5000(dfu)
@@ -726,6 +816,11 @@ def main():
             elif sys.argv[1] == "calibration":
                 dfu = init_dfu()
                 parse_calibration(dfu)
+            elif sys.argv[1] == 'screenshot':
+                dfu = init_dfu()
+                screenshot(dfu)
+            else:
+                usage()
 
         elif len(sys.argv) == 3:
             if sys.argv[1] == 'flashdump':
@@ -761,6 +856,11 @@ def main():
                 dfu = init_dfu()
                 dfu.custom(int(sys.argv[2], 16))
                 dmesg(dfu)
+            elif sys.argv[1] == 'screenshot':
+                dfu = init_dfu()
+                screenshot(dfu, sys.argv[2])
+            else:
+                usage()
 
         elif len(sys.argv) == 4:
             if sys.argv[1] == 'spiflashwrite':
@@ -770,17 +870,24 @@ def main():
                     dfu = init_dfu()
                     spiflashwrite(dfu, sys.argv[2], adr)
                 else:
-                    print("address to low")
-            if sys.argv[1] == 'dump':
+                    print("address too low")
+            elif sys.argv[1] == 'dump':
                 print("Dumping memory from %s." % sys.argv[3])
                 dfu = init_dfu()
                 dump(dfu, sys.argv[2], sys.argv[3])
+            else:
+                usage()
 
         else:
             usage()
 
     except RuntimeError as e:
         print(e.args[0])
+        exit(1)
+    except usb.core.USBError as ue:
+        print(ue)
+        if ue[0] == 32:
+            print('Make sure the device is already flashed with custom firmware and NOT in DFU mode')
         exit(1)
     except Exception as e:
         print(e)

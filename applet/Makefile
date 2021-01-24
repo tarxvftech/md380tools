@@ -4,7 +4,7 @@ MKLISTING=1
 FW ?= D13_020
 
 ifeq (,$(wildcard mark.tmp))
-	# not exists
+  # not exists
   PROBLEM=0	
 else
   old_build := $(shell cat mark.tmp)
@@ -53,7 +53,18 @@ SRCS += lastheard.o
 SRCS += etsi.o
 SRCS += sms.o
 SRCS += beep.o
-SRCS += irq_handlers.o # DL4YHF 2017-01-06
+SRCS += irq_handlers.o
+SRCS += system_hrc5000.o
+SRCS += narrator.o
+SRCS += lcd_driver.o
+SRCS += font_8_8.o
+SRCS += app_menu.o
+SRCS += color_picker.o
+SRCS += amenu_hexmon.o
+SRCS += amenu_utils.o
+SRCS += amenu_set_tg.o
+SRCS += amenu_channels.o
+SRCS += amenu_codeplug.o
 SRCS += timer.o
 
 ifdef INC_DISPFLIP
@@ -84,6 +95,7 @@ ifdef MKLISTING
 CFLAGS += -Wa,-a=$(@:.o=.lst)
 endif
 CFLAGS += -D$(FWDEFINE)	
+CFLAGS += $(CIFLAGS)
 ###################################################
 
 vpath %.c src
@@ -157,8 +169,11 @@ applet.elf: $(SRCS)
 #Temporary file containing the build date.
 #Might use version numbers when we're ready for releases.
 src/version.h: src/*.c
-	echo "#define VERSIONDATE L\"`date "+%Y-%m-%d"`\"" >src/version.h
+	echo "#ifndef VERSION_H" >src/version.h
+	echo "#define VERSION_H" >>src/version.h
+	echo "#define VERSIONDATE L\"`date "+%Y-%m-%d"`\"" >>src/version.h
 	echo "#define GIT_VERSION \"$(GIT_VERSION)\"" >>src/version.h
+	echo "#endif" >>src/version.h
 
 clean:
 	"${MAKE}" -C ../patches/$(PATCHDIR) clean
@@ -174,7 +189,8 @@ image_D13:
 image_S13:
 	"${MAKE}" FW=S13_020 all  
 
+.PHONY: ci
 ci:
-	"${MAKE}" clean image_D02
-	"${MAKE}" clean image_S13
-	"${MAKE}" clean image_D13
+	"${MAKE}" CIFLAGS="-Werror -Wno-cpp" clean image_D02
+	"${MAKE}" CIFLAGS="-Werror -Wno-cpp" clean image_S13
+	"${MAKE}" CIFLAGS="-Werror -Wno-cpp" clean image_D13

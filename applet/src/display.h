@@ -94,6 +94,7 @@ gfx_drawtex6( sp+4, 25, 32, 18 );
 void draw_eye_opt();
 void draw_micbargraph();
 void draw_rx_screen(unsigned int bg_color);
+void draw_ta_screen(unsigned int bg_color);
 
 void draw_statusline( uint32_t r0 ); // in md380
 
@@ -106,6 +107,10 @@ void draw_datetime_row(); // in md380
 #define OPM2_ALARM_RECV 7
 
 #define OPM2_MENU 10
+
+extern uint8_t lh_cc ;
+extern uint8_t lh_ts ;
+extern uint8_t lh_tg ;
 
 extern uint8_t gui_opmode2 ;
 extern uint8_t gui_opmode3 ;

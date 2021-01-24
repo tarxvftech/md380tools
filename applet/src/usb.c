@@ -15,6 +15,7 @@
   an audio transmission or reception.
 */
 
+#define DEBUG
 
 #include <string.h>
 
@@ -28,6 +29,12 @@
 #include "spiflash.h"
 #include "string.h"
 #include "syslog.h"
+#include "lcd_driver.h"
+#include "irq_handlers.h"
+#include "keyb.h"
+#include "stm32f4xx_flash.h"
+
+void reboot_into_bootloader();
 
 int usb_upld_hook(void* iface, char *packet, int bRequest, int something){
   /* This hooks the USB Device Firmware Update upload function,
@@ -46,15 +53,26 @@ int usb_upld_hook(void* iface, char *packet, int bRequest, int something){
   //We have to send this much.
   uint16_t length= *(short*)(packet+6);
   
+#    ifdef DEBUG // debugging USB-handlers ?
+      if( keypress_ascii_at_power_on == 'D' ) // debugging temporarily enabled ...
+       { // .. via 'Down'-key at power on ? 
+         LOGB("t=%d:USBup: l=%d,b=%d\n", // visible in what used to be Netmon3 (2017-05-21)
+           (int)IRQ_dwSysTickCounter,
+           (int)length, (int)blockadr );
+       }
+#    endif // DEBUG ?
+
   
   /* The DFU protocol specifies reads from block 0 as something
      special, but it doesn't say way to do about an address of 1.
      Shall I take it over?  Don't mind if I do!
    */
   if(blockadr==1){
+
     //Some special addresses need help before the transfer.
     if(md380_dfutargetadr == dmesg_start){
       //int state=OS_ENTER_CRITICAL();
+
       /* We can't send the DMESG buffer itself, because it's in the
 	 tightly coupled memory, so we'll memcpy() it to a buffer in
 	 SRAM and then transmit it.
@@ -68,6 +86,13 @@ int usb_upld_hook(void* iface, char *packet, int bRequest, int something){
       usb_send_packet(iface,   //USB interface structure.
 		      dmesg_tx_buf, //Send the copy, not the original.
 		      length); //Length must match.
+
+#    ifdef DEBUG
+      if( keypress_ascii_at_power_on == 'D' ) 
+       { LOGB("t=%d: usb_up: cp+sent\n", (int)IRQ_dwSysTickCounter ); // "copied and sent"
+       }
+#    endif
+
       return 0;
     }
     
@@ -76,6 +101,13 @@ int usb_upld_hook(void* iface, char *packet, int bRequest, int something){
     usb_send_packet(iface,   //USB interface structure.
 		    md380_dfutargetadr,
 		    length); //Length must match.
+#  ifdef DEBUG
+    if( keypress_ascii_at_power_on == 'D' ) 
+     { LOGB("t=%d:USBup: sent\n", (int)IRQ_dwSysTickCounter ); // "sent without memcopy"
+       // (when sending the LCD framebuffer, ~~ 1 ms elapsed between two tiles)
+     }
+#  endif
+
     return 0;
   }
   
@@ -92,6 +124,17 @@ int usb_dnld_hook(){
   */
   
   int state;
+
+#    ifdef DEBUG
+      if( keypress_ascii_at_power_on == 'D' ) // added 2017-05-21, trying to debug TDFU_READ_FRAMEBUFFER.
+       { LOGB("t=%d:USBdn: cmd=%02X,b=%d\n",  // When NOT seeing any of these 'USBdn'-messages, 
+           (int)IRQ_dwSysTickCounter,         // it's the same problem as with the SPI-flash-ID (!)
+           (int)md380_packet[0], (int)(*md380_blockadr) ); // - see advice from N6YN, github issue #186
+       } // (on Windows, LibUsb sometimes needed to be 'tickled' by running "TestLibUsb".
+         //  No idea why this problem affected the framebuffer-transfer but NOT the normal RAM-readout...
+#    endif // DEBUG ?
+
+
   
   /* DFU transfers begin at block 2, and special commands hook block
      0.  We'll use block 1, because it handily fits in the gap without
@@ -242,7 +285,51 @@ int usb_dnld_hook(){
     case TDFU_SYSLOG:
       syslog_dump_dmesg();
       break;
-    
+
+#if(CONFIG_APP_MENU)
+    case TDFU_READ_FRAMEBUFFER_24BPP: // read a tile with 24-bit RGB from the framebuffer.
+       // Re-uses the dmesg tx buffer. If the app-menu's LCD driver is available,
+       // this command reads out the LCD framebuffer in sufficiently small chunks ("tiles").
+       // 160 pixels (x) / 16 pixels per tile = 10 tiles per screen horizontally,
+       // 128 pixels (y) / 16 pixels per tile =  8 tile per screen vertically,
+       // 10 * 8 = 80 tiles to read the entire framebuffer via USB .
+       *md380_dfu_target_adr=dmesg_tx_buf; // dmesg_tx_buf = (char*)DMESG_START = 0x2001F700
+       dmesg_tx_buf[0] = md380_packet[0];  // echo command byte
+       dmesg_tx_buf[1] = dmesg_tx_buf[2] = 0xFF; // 'function currently not available'
+       dmesg_tx_buf[3] = dmesg_tx_buf[4] = 0xFF; // invalid coords to indicate problem 
+       if( LCD_busy ) 
+        { // Don't "interrupt" the drawing process, instead let the remote "viewer"
+          // (or screenshot utility) try again a few milliseconds later !
+        }
+       else // LCD controller/driver not busy, try to read pixels from framebuffer:
+        {
+          if( 0 < LCD_CopyRectFromFramebuffer_RGB(
+                *((uint8_t*)(md380_packet+1)), // [in] x1 (tile start coord)
+                *((uint8_t*)(md380_packet+2)), // [in] y1
+                *((uint8_t*)(md380_packet+3)), // [in] x2 (tile end coord)
+                *((uint8_t*)(md380_packet+4)), // [in] y2
+                (uint8_t *)dmesg_tx_buf+5, // destination buffer, with rect-coords followed by 3 bytes per pixel
+                    DMESG_SIZE ) ) // [in] sizeof_dest, for sanity check
+           { // Positive value returned LCD_CopyRectFromFramebuffer() : "ok" !
+             dmesg_tx_buf[1] = md380_packet[1]; // echo parameters ..
+             dmesg_tx_buf[2] = md380_packet[2]; // .. so the client can request
+             dmesg_tx_buf[3] = md380_packet[3]; //    retransmission if a packet got lost
+             dmesg_tx_buf[4] = md380_packet[4]; // last parameter: y2
+           }
+        }
+       break;
+#endif // app-menu's LCD driver available (to read from framebuffer) ?
+#if( CAN_POLL_KEYS )
+    case TDFU_REMOTE_KEY_EVENT: // process 'remote keyboard' event
+       // [in] md380_packet[1] = ASCII key ('M','U','D','B','0'..'9','*','#')
+       //      md380_packet[2] = key_down_flag (1=pressed, 0=released)
+       kb_OnRemoteKeyEvent( md380_packet[1]/*key_ascii*/, md380_packet[2]/*key_down_flag*/ ); 
+       break;
+#endif // can poll keys ?
+
+    case TDFU_REBOOT_TO_BOOTLOADER:
+       reboot_into_bootloader();
+       break; 
     default:
       printf("Unhandled DFU packet type 0x%02x.\n",md380_packet[0]);
     }
@@ -269,7 +356,7 @@ void * get_md380_dnld_tohook_addr(){
   int ram_size = 0x1ffff / 4;
   int i;
   int n=0;
-  void * ret;
+  void * ret = NULL;
  
   for (i = 0;  i < ram_size ; i++){
     if (usb_dnld_handle == (void *) ram_start[i]){
@@ -353,8 +440,45 @@ const char *getmfgstr(int speed, long *len){
 
 void loadfirmwareversion_hook()
 {
-    memcpy(print_buffer, VERSIONDATE, 22);
+    static int version_state = 0;
+    switch (version_state) {
+      default:
+        version_state = 0;
+      case 0:
+        snprintfw(print_buffer, 18, GIT_VERSION);
+        version_state++;
+        break;
+      case 1:
+        memcpy(print_buffer, VERSIONDATE, 24);
+        version_state++;
+        break;
+    }
     return;
+}
+typedef void (*void_func_ptr)(void);
+void reboot_into_bootloader(){
+  /*from #193: 
+   * travis says:
+    There's a nice generic way to do it:
+
+    Disable interrupts.
+    Erase the block at 0x0800C000, so that the interrupt table is empty and the bootloader won't start the main application.
+    Branch to the address stored in 0x08000004, which is the bootloader's RESET vector.
+    The bootloader will then launch and wait for comms, rather than branch into the main application.
+
+   */
+  __disable_irq(); //disable interrupts
+  // from STM32F4xx_DSP_StdPeriph_Lib/Project/STM32F4xx_StdPeriph_Examples/FLASH/FLASH_Program/main.h
+  //#define ADDR_FLASH_SECTOR_3     ((uint32_t)0x0800C000) /* Base address of Sector 3, 16 Kbytes   */
+  //this is just copied here so I can remember why I chose sector 3 -mike
+  //
+  int *reset_handler_ptr = (int *) 0x08000004; 
+  int * reset_handler = (int *) * reset_handler_ptr;
+  FLASH_Unlock();
+  //no idea on the voltage range, but 3 works for me - mike
+  FLASH_EraseSector(FLASH_Sector_3, VoltageRange_3 ); //just erased that sector
+  (*(void_func_ptr)(reset_handler))(); //branch to address kept at 0x08000004
+  //bootloader should be ready and waiting, good to go
 }
 
 //Must be const, because globals will be wacked.

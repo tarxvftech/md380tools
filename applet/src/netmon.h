@@ -25,7 +25,13 @@ extern uint8_t last_event5 ;
 
 extern uint8_t nm_screen ;
 extern uint8_t nm_started ;
+extern uint8_t nm_started5 ;
+extern uint8_t nm_started6 ;
 extern uint8_t rx_voice ;
+
+extern uint8_t lh_cc;
+extern uint8_t lh_ts;
+extern uint8_t lh_tg;
 
 inline int is_netmon_enabled()
 {
