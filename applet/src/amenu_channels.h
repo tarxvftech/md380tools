@@ -6,6 +6,8 @@
 //  - a fast-scrolling CONTACTS list,
 //  - and maybe more in future .
 // Details in the implementation - see amenu_codeplug.c .
+#ifndef AMENU_CHANNELS_H
+#define AMENU_CHANNELS_H
 
 extern int 	ZoneList_nEntries;		// number of entries in the zone list.
 extern int 	ZoneList_iCurrent;		// index of the currently selected (active) zone.
@@ -19,3 +21,4 @@ extern BOOL	ChannelList_ReadNameByIndex(int index, channel_t *tChannel);
 extern int	SaveChannel(channel_t* chan, channel_easy* chanE);
 extern int	ParseChannel(channel_t* chan, channel_easy* chanE);
 extern int	readTone(channel_t* chan, tone_t* tone, char fEnc);
+#endif

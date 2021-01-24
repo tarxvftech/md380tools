@@ -2,6 +2,9 @@
   \brief Graphics function wrappers.
 */
 
+#ifndef GFX_H
+#define GFX_H
+
 // 160 pixels wide, 128 pixels high
 #define MAX_X 159
 #define MAX_Y 127    
@@ -176,3 +179,5 @@ uint32_t gfx_get_fg_color(void);
    // (still this warning was displayed dozens of times when making 'image_D02' ..)
 # endif // compiling MAIN.C ?
 #endif // WARN ?
+
+#endif

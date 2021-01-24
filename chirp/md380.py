@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Copyright 2012 Dan Smith <dsmith@danplanet.com>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -16,6 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+
 # This is an incomplete and bug-ridden attempt at a chirp driver for
 # the TYT MD-380 by Travis Goodspeed, KK4VCZ.  To use this plugin,
 # copy or symlink it into the drivers/ directory of Chirp.
@@ -24,27 +23,63 @@
 # radio.img' and then open it as a file with chirpw.
 
 
-import logging
+from chirp import chirp_common, directory, memmap
+from chirp import bitwise, errors
+try:
+    from chirp.dmr import *
+except:
+    print("Current Chirp does not have DMR support. This driver will fail!")
+
 
 from chirp.settings import RadioSetting, RadioSettingGroup, \
-    RadioSettingValueInteger, RadioSettingValueString, \
-    RadioSettings
+    RadioSettingValueInteger, RadioSettingValueList, \
+    RadioSettingValueBoolean, RadioSettingValueString, \
+    RadioSettingValueFloat, InvalidValueError, RadioSettings
 
-from chirp import bitwise
-from chirp import chirp_common, directory, memmap
-
+import logging
 LOG = logging.getLogger(__name__)
+import tempfile
+import os
+
+try:
+    from md380tools.md380_dfu import *
+except:
+    print("md380tools not found as a module. This driver will fail!")
+
 
 # Someday I'll figure out Chinese encoding, but for now we'll stick to ASCII.
 CHARSET = ["%i" % int(x) for x in range(0, 10)] + \
-          [chr(x) for x in range(ord("A"), ord("Z") + 1)] + \
-          [" ", ] + \
-          [chr(x) for x in range(ord("a"), ord("z") + 1)] + \
-          list(".,:;*#_-/&()@!?^ +") + list("\x00" * 100)
-DUPLEX = ["", "-", "+", "split"]
-# TODO 'DMR' should be added as a valid mode.
-MODES = ["DIG", "NFM", "FM"]
+    [chr(x) for x in range(ord("A"), ord("Z") + 1)] + \
+    [" ", ] + \
+    [chr(x) for x in range(ord("a"), ord("z") + 1)] + \
+    list(".,:;*#_-/&()@!?^ +") + list("\x00" * 100)
+DUPLEX = ["", "-", "+", "split"];
+
+MODES = ["DMR", "NFM", "FM"];
 TMODES = ["", "Tone", "TSQL"]
+BUTTON= { #not complete
+        "unassigned":0x00,
+        "alert_tones_toggle":0x01,
+        "emergency_on":0x02,
+        "emergency_off":0x03,
+        "power_toggle":0x04,
+        "monitor":0x05,
+        "nuisance_delete":0x06,
+        "ota_1":0x07,
+        "ota_2":0x08,
+        "ota_3":0x09,
+        "ota_4":0x0A,
+        "ota_5":0x0B,
+        "ota_6":0x0C,
+        "talkaround":0x0d,
+        "scan_toggle":0x0e,
+        "squelch_toggle":0x15,
+        "privacy_toggle":0x16,
+        "vox_toggle":0x17,
+        "zone_select":0x18,
+        "manual_dial":0x1e, #are these correct? don't agree with md380-codeplug
+        "lone_work_toggle":0x1f,
+        }
 
 # Here is where we define the memory map for the radio. Since
 # We often just know small bits of it, we can use #seekto to skip
@@ -69,6 +104,12 @@ struct {
   char name[32]; //U16L chars, of course.
 } contacts[1000];
 
+#seekto 0x0000ec20;
+struct {
+  char name[32];
+  ul16 members[32];
+} grouplists[250];
+
 
 #seekto 0x00018860;
 struct {
@@ -78,7 +119,7 @@ struct {
 } scanlists[20];
 
 #seekto 0x0001EE00;
-struct { //0x1F025 into rdt
+struct { //0x1F025 into rdt?
 //unknown features:
     //emergency system
     //private call confirm, emergency alarm ack, data call confirm
@@ -93,9 +134,10 @@ struct { //0x1F025 into rdt
     // DCS probably doesn't work at all
 
   //First byte is 62 for digital, 61 for analog
+  //0x25 into rdt
   u8 mode;   //Upper nybble is 6 for normal squelch, 4 for tight squelch
              //Low nybble is
-             //61 for digital, 61 for nbfm, 69 for wbfm
+             //|2 for digital, |1 for nbfm, |8 for 25khz  (fm)
   u8 slot;       //Upper nybble is the color code
                  //lower nybble is bitfield:
                  // |4 for S1, |8 for S2
@@ -104,6 +146,7 @@ struct { //0x1F025 into rdt
                  //slotnotes:  0000 0000
                  //            colr 12rt
   char priv;           //Upper nybble is 0 for cleartex, 1 for Basic Privacy, 2 for Enhanced Privacy.
+                        //upper nybble |4 is "send compressed udp data header"
                        //Low nybble is key index.  (E is slot 15, 0 is slot 1.)
   char wase0;          //Unknown, normally E0
                         //0xa0 for "compressed udp data header" turned on
@@ -116,18 +159,36 @@ struct { //0x1F025 into rdt
                         // low nibble: unknown, usually 0x4
                        // 0 0  0 0   0 0  0 0
                        // CcCf HpVx            
-
   char wasc3;          //Unknown, normally C3
+  //0x2E
   ul16 contact;        //Digital contact name.  (TX group.)  TODO
+  //0x2D
   char unknown[3];     //Certainly analog or digital settings, but I don't know the bits yet.
+  //0x30
   u8 scanlist;         //Not yet supported.
+  //0x31 into rdt
   u8 grouplist;        //DMR Group list index. TODO
-  char unknown2[3];
+  //0x32
+  char gpssystem; //0x00 for none, 0x01 for gps system 1, 0x10 for gps system 16
+  //0x33
+  char unknown22;
+  //0x34
+  char unknown23;
+  //0x35
   lbcd rxfreq[4];
+  //0x39
   lbcd txfreq[4];      //Stored as frequency, not offset.
+  //0x3D
   lbcd ctone[2];       //Receiver tone.  (0xFFFF when unused.)
   lbcd rtone[2];       //Transmitter tone.
-  char yourguess[4];
+  //0x41
+  char yourguess11;
+  char yourguess12;
+  char yourguess2;
+  char   gps; 
+                //|1 for disable send gps data
+                //|2 for disable receive gps data
+//0x45
   char name[32];    //UTF16-LE
 } memory[1000];
 
@@ -145,12 +206,10 @@ struct {
 } info;
 
 #seekto 0x59C0; //0x5be5
-//not tested
+//not tested, endianness unsure
 struct {
-    //char enhanced [ 8 ][ 16 ] ; //bitwise doesn't seem to like this
-    //this could be better, please fix me
     struct {
-        char key[16];
+        char key[16]; 
     } enhanced[8];
     u16 basic[ 16 ] ;
 } encryption_keys;
@@ -158,36 +217,15 @@ struct {
 #seekto 0x2102; //0x2327 rdt
 // not yet tested
 struct {
-//  for each:
-//      0x01 is all alert tones toggle
-//      0x02 is emergency on
-//      0x03 is emergency off
-//      0x04 is high/low power
-//      0x05 is monitor
-//      0x06 is nuisance delete
-//      0x07 is one touch access 1
-//      0x08 is ota 2
-//      0x09 is ota 3
-//      0x0A is ota 4
-//      0x0B is ota 5
-//      0x0C must be ota 6
-//      0x0d is talkaround
-//      0x0e is scan toggle
-//      0x15 is squelch toggle
-//      0x16 is privacy toggle
-//      0x17 is vox toggle
-//      0x18 is zone select 
-//      0x1e is manual dial for private
-//      0x1f is lone work toggle
-
-    char button1short;
-    char button1long;
-    char button2short;
-    char button2long;
+    u8 button1short;
+    u8 button1long;
+    u8 button2short;
+    u8 button2long;
 } buttons;
 
 #seekto 0x20F1; //0x2316 rdt
 struct {
+// in original cps:
 // contacts has 8 options
 // utilities has 12 options
 // call log has 3 options
@@ -204,9 +242,12 @@ struct {
                     //  |1 is
     char utilities1; //when all options available, 0xff
     char utilities2; //when all options available, 0xbf
-        // 0x3f if vox disabled, 0xbf if vox enabled
-    char utilities3; //when all options on, 0xfb
+        // 0x3f if vox menu item disabled, 0xbf if vox enabled
+    char utilities3; 
+        // |8 is GPS disabled
+        //when all options on, 0xfb //this is from before gps was known
         // 0xfb if front panel programming allowed, 0xff is fpp disabled
+
     
 } menuoptions;
 
@@ -254,112 +295,143 @@ struct {
     ul16 contactidxs[32];    // list of contact indexes in this RX Group
 } rxgrouplist[200]; //supposed to be 250, but weirdness in last 12 rxgroups, so now 200
 
-"""
+#seekto 0x3EC3B; //0x3EE60 in RDT
+struct { //16 byte struct
+    char ff1[4]; //0xff normally
+    //0x64
+    char ff2;
+    //0x65
+    ul16 revert_to_channel_by_idx; 
+        // 0 = don't revert channel (send gps data to currently selected channel)
+        // 1 = channel/memory index
+    u8 report_interval; //none=0, 30s=1, 60s=2, 30 second increments up to 7200 seconds ( dec int 240 here)
+    char ff3;
+    ul16 destination_contact_by_idx;
+        // 0 = no contact
+        // 1 = first contact
+    char ff4;
+    char ff5[4];
 
+//gps2 with channel1, 7200s, contact1 (from rdt file)
+//0x3ee70: ffff ffff ff01 00f0 ff01 00ff ffff ffff
+
+} gpssystems[16];
+
+"""
 
 def blankbcd(num):
     """Sets an LBCD value to 0xFFFF"""
-    num[0].set_bits(0xFF)
-    num[1].set_bits(0xFF)
-
-
-def do_download(radio):
-    """Dummy function that will someday download from the radio."""
-    # NOTE: Remove this in your real implementation!
-    # return memmap.MemoryMap("\x00" * 262144)
-
-    # Get the serial port connection
-    serial = radio.pipe
-
-    # Our fake radio is just a simple download of 262144 bytes
-    # from the serial port. Do that one byte at a time and
-    # store them in the memory map
-    data = ""
-    for _i in range(0, 262144):
-        data = serial.read(1)
-
-    return memmap.MemoryMap(data)
-
-
-def do_upload(radio):
-    """Dummy function that will someday upload to the radio."""
-    # NOTE: Remove this in your real implementation!
-    # raise Exception("This template driver does not really work!")
-
-    # Get the serial port connection
-    serial = radio.pipe
-
-    # Our fake radio is just a simple upload of 262144 bytes
-    # to the serial port. Do that one byte at a time, reading
-    # from our memory map
-    for i in range(0, 262144):
-        serial.write(radio.get_mmap()[i])
-
+    num[0].set_bits(0xFF);
+    num[1].set_bits(0xFF);
 
 def utftoasc(utfstring):
     """Converts a UTF16 string to ASCII by dropping the zeroes."""
-    toret = ""
+    toret="";
     for c in utfstring:
-        if c != '\x00':
-            toret += c
-    return toret
+        if c!='\x00':
+            toret+=c;
+    return toret;
 
-
-def asctoutf(ascstring, size=None):
+def asctoutf(ascstring,size=None):
     """Converts an ASCII string to UTF16."""
-    toret = ""
+    toret="";
     for c in ascstring:
-        toret = toret + c + "\x00"
-    if size is not None:
-        return toret
+        toret=toret+c+"\x00";
+    if size==None: return toret;
+    
+    #Correct the size here.
+    while len(toret)<size:
+        toret=toret+"\x00";
 
-    # Correct the size here.
-    while len(toret) < size:
-        toret += "\x00"
+    return toret[:size];
 
-    return toret[:size]
+class MD380Contact( DMRContact ):
+    def __init__(self, *args, **kwargs):
+        super( MD380Contact, self).__init__( *args, **kwargs)
+        self.name = utftoasc( str( self.name ))
+        self.name = self.name.strip()
+        if hasattr(self.callid, 'get_value'):
+            self.callid = self.callid.get_value()
+        if hasattr(self.flags, 'get_value'):
+            self.flags = self.flags.get_value()
 
+    def out(self):
+        # shouldn't actually modify self.
+        self.name = asctoutf( self.name.ljust(16) )
+        return super( MD380Contact, self).out()
+
+    def isempty(self):
+        if self.name.strip() == '':
+            return True
+
+        return False
+
+class MD380ContactList( DMRContactList ):
+    def to_csv(self, fh):
+        w = csv.DictWriter( fh, fieldnames=self.fieldnames)
+        for each in self.cl:
+            name = each.name
+            callid = each.callid
+            flags = each.flags
+            if type(callid) == 'instance':
+                callid = int(callid, 16)
+            if type(flags) == 'instance':
+                flags = int(flags, 16)
+            c = {'name':name, 'callid':callid, 'flags':flags}
+            w.writerow( c )
+
+
+class MD380RXGroup( DMRRXGroup ):
+    def __init__(self, *args, **kwargs):
+        super( MD380RXGroup, self).__init__( *args, **kwargs)
+        self.name = utftoasc( str( self.name ))
+        self.name = self.name.strip()
+
+    def out(self):
+        # shouldn't actually modify self.
+        self.name = asctoutf( self.name.ljust(16) )
+        return super( MD380RXGroup, self).out()
+
+    def isempty(self):
+        if self.name.strip() == '':
+            return True
+
+        return False
 
 class MD380Bank(chirp_common.NamedBank):
-    """A VX3 Bank"""
-
+    """A MD380 Bank"""
     def get_name(self):
-        _bank = self._radio._memobj.bank[self.index]
-        name = utftoasc(str(_bank.name))
-        return name.rstrip()
+        _bank = self._radio._memobj.bank[self.index];
+        name = utftoasc(str(_bank.name));
+        return name.rstrip();
 
     def set_name(self, name):
         name = name.upper()
-        _bank = self._radio._memobj.bank[self.index]
-        _bank.name = asctoutf(name, 32)
-
+        _bank = self._radio._memobj.bank[self.index];
+        _bank.name = asctoutf(name,32);
 
 class MD380BankModel(chirp_common.MTOBankModel):
     """An MD380 Bank model"""
-
     def get_num_mappings(self):
         return 99
-        # return len(self.get_mappings());
+        #return len(self.get_mappings());
 
     def get_mappings(self):
         banks = []
         for i in range(0, 99):
-            # bank = chirp_common.Bank(self, "%i" % (i+1), "MG%i" % (i+1))
-            bank = MD380Bank(self, "%i" % (i + 1), "MG%i" % (i + 1))
-            bank._radio = self._radio
-            bank.index = i
-            # print("Bank #%i has name %s" % (i, bank.get_name()))
-            # if len(bank.get_name())>0:
-            banks.append(bank)
+            bank = MD380Bank(self, "%i" % (i+1), "MG%i" % (i+1))
+            bank._radio=self._radio;
+            bank.index = i;
+            banks.append(bank);
         return banks
 
     def add_memory_to_mapping(self, memory, bank):
         _members = self._radio._memobj.bank[bank.index].members
-        # _bank_used = self._radio._memobj.bank_used[bank.index]
+        #_bank_used = self._radio._memobj.bank_used[bank.index]
         for i in range(0, 16):
             if _members[i] == 0x0000:
                 _members[i] = memory.number
-                # _bank_used.in_use = 0x0000
+                #_bank_used.in_use = 0x0000
                 break
 
     def remove_memory_from_mapping(self, memory, bank):
@@ -368,7 +440,7 @@ class MD380BankModel(chirp_common.MTOBankModel):
         found = False
         remaining_members = 0
         for i in range(0, len(_members)):
-            if _members[i] == memory.number:
+            if _members[i] == (memory.number):
                 _members[i] = 0x0000
                 found = True
             elif _members[i] != 0x0000:
@@ -378,24 +450,24 @@ class MD380BankModel(chirp_common.MTOBankModel):
             raise Exception("Memory {num} not in " +
                             "bank {bank}".format(num=memory.number,
                                                  bank=bank))
-            # if not remaining_members:
-            #    _bank_used.in_use = 0x0000
+        #if not remaining_members:
+        #    _bank_used.in_use = 0x0000
 
     def get_mapping_memories(self, bank):
         memories = []
-
+        
         _members = self._radio._memobj.bank[bank.index].members
-        # _bank_used = self._radio._memobj.bank_used[bank.index]
+        #_bank_used = self._radio._memobj.bank_used[bank.index]
 
-        # if _bank_used.in_use == 0x0000:
+        #if _bank_used.in_use == 0x0000:
         #    return memories
 
         for number in _members:
-            # Zero items are not memories.
+            #Zero items are not memories.
             if number == 0x0000:
                 continue
-
-            mem = self._radio.get_memory(number)
+            
+            mem=self._radio.get_memory(number)
             print("Appending memory %i" % number)
             memories.append(mem)
         return memories
@@ -409,227 +481,373 @@ class MD380BankModel(chirp_common.MTOBankModel):
         return banks
 
 
-# Uncomment this to actually register this radio in CHIRP
 @directory.register
-class MD380Radio(chirp_common.CloneModeRadio):
+class MD380Radio(chirp_common.CloneModeRadio, chirp_common.DMRSupport, DMRRadio ):
     """MD380 Binary File"""
     VENDOR = "TYT"
     MODEL = "MD-380"
     FILE_EXTENSION = "img"
-    BAUD_RATE = 9600  # This is a lie.
+    BAUD_RATE = 9600    # This is a lie.
+    NO_SERIAL = True
 
-    _memsize = 262144
+    rxgroup = MD380RXGroup
+    contact = MD380Contact
+    
+    _memsize=262144;
+
 
     @classmethod
     def match_model(cls, filedata, filename):
         return (
-            len(filedata) == cls._memsize
-            or len(filedata) == cls._memsize + 565
-        )
+               len(filedata) == cls._memsize
+            or len(filedata) == cls._memsize+565
+            );
+    
+    def __init__(self,*args, **kwargs):
+        super( MD380Radio, self).__init__(*args,**kwargs)
 
+
+    def set_rxgrouplist(self, rxgrouplistidx, name, contactidxs):
+        i = rxgrouplistidx
+        self._memobj.rxgrouplist[i].name = name
+        self._memobj.rxgrouplist[i].contactidxs = contactidxs
+
+    def set_contact( self, contactidx, name, callid, flags ):
+        i = contactidx
+        self._memobj.contacts[i].name = name
+        self._memobj.contacts[i].callid = callid
+        self._memobj.contacts[i].flags = flags
+
+
+    def fix(self):
+        #regarding fix and unfix: sorry!
+        print("MD380.fix() - move these bits elsewhere")
+        # super( MD380Radio, self).fix()
+        self.rxgroups = self.rxgrouplist( [ self.rxgroup(x) for x in self._memobj.rxgrouplist ] )
+        self.contacts = self.contactlist( [ self.contact(x) for x in self._memobj.contacts    ] )
+
+    def unfix(self):
+        print("MD380.unfix() - move these bits elsewhere")
+        try:
+            self.rxgroups.resolve( self )
+        except Exception as e:
+            print("During rxgroups resolve in unfix()", e)
+            raise(e)
+
+        for i in range(0, len(self.rxgroups)):
+            try:
+                g = self.rxgroups[i].out()
+                self.set_rxgrouplist( i, g['name'], g['contactidxs'] )
+            except IndexError as e:
+                print(i, g, e)
+        for i in range(0, len(self.contacts)):
+            try:
+                c = self.contacts[i].out()
+                self.set_contact(i, c['name'], c['callid'], c['flags'])
+            except IndexError as e:
+                print(i, c, e)
+
+        # super( MD380Radio, self).unfix()
+        bm = self.get_bank_model()
+        bs = bm.get_mappings()
+
+        #remove all zone channels (so adding all channels to zones can work)
+        for b in bs:
+            print(b.get_name())
+            ms = bm.get_mapping_memories( b )
+            for m in ms:
+                bm.remove_memory_from_mapping( m, b )
+
+        l,h = self.get_features().memory_bounds
+        #add all channels to a zone numerically (for testing, TODO)
+        for i in xrange(l, h+1):
+            m = self.get_memory(i)
+            b = bs[(i-1)/16]
+            b.set_name( "Z%d"%((i-1)/16) )
+            bm.add_memory_to_mapping(m,b)
+
+        print("MD380 unfix")
+
+    def enable_gps(self):
+        self._memobj.menuoptions.utilities3 = 0xF3 
+        #also enables front panel programming, but I don't think anyone will complain
+
+    def set_buttons(self, four_el_arr):
+        b = self._memobj.buttons
+        b.button1short = BUTTON[ four_el_arr[0] ]
+        b.button1long =  BUTTON[ four_el_arr[1] ]
+        b.button2short = BUTTON[ four_el_arr[2] ]
+        b.button2long =  BUTTON[ four_el_arr[3] ]
+
+    def button_name_by_value(self,value):
+        value = int(value)
+        for name, val in BUTTON.iteritems():
+            if value == val:
+                return name
+        return None
+
+    def get_buttons(self):
+        b = self._memobj.buttons
+        arr = []
+        arr.append( self.button_name_by_value( b.button1short ) )
+        arr.append( self.button_name_by_value( b.button1long  ) )
+        arr.append( self.button_name_by_value( b.button2short ) )
+        arr.append( self.button_name_by_value( b.button2long  ) )
+        return arr
+    
     # Return information about this radio's features, including
     # how many memories it has, what bands it supports, etc
     def get_features(self):
+        #TODO GPS feature?
         rf = chirp_common.RadioFeatures()
         rf.has_bank = True
         rf.has_bank_index = True
         rf.has_bank_names = True
         rf.can_odd_split = True
         rf.valid_tmodes = TMODES
+        rf.valid_power_levels = ["HIGH","LOW"]
         rf.memory_bounds = (1, 999)  # Maybe 1000?
-
-        rf.valid_bands = [(400000000, 480000000),  # 70cm model is most common.
+        
+        rf.valid_bands = [(400000000, 480000000), # 70cm model is most common.
                           (136000000, 174000000)  # 2m model sold separately.
                           ]
-        rf.valid_characters = "".join(CHARSET)
-        rf.has_settings = True
-        rf.has_tuning_step = False
-        rf.has_ctone = True
-        rf.has_dtcs = False  # TODO Enable DTCS support.
-        rf.has_cross = False
-        rf.valid_modes = list(MODES)
-        rf.valid_skips = [""]  # ["", "S"]
-        #        rf.valid_tmodes = ["", "Tone", "TSQL", "DTCS", "Cross"]
+        rf.valid_characters = "".join(CHARSET);
+        rf.has_settings = True;
+        rf.has_tuning_step = False;
+        rf.has_ctone=True;
+        rf.has_dtcs=False;   #TODO Enable DTCS support.
+        rf.has_cross=False;
+        rf.valid_modes = list(MODES);
+        rf.valid_skips = [""]; #["", "S"]
+#        rf.valid_tmodes = ["", "Tone", "TSQL", "DTCS", "Cross"]
         rf.valid_tmodes = ["", "Tone", "TSQL"]
         rf.valid_duplexes = list(DUPLEX)
         rf.valid_name_length = 16
         return rf
-
+    
     # Processes the mmap from a file.
     def process_mmap(self):
-        if len(self._mmap) == self._memsize:
+        if(len(self._mmap)==self._memsize):
             self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
-        elif len(self._mmap) == self._memsize + 565:
+        elif(len(self._mmap)==self._memsize+565):
             self._memobj = bitwise.parse(MEM_FORMAT, self._mmap[549:])
-
-            # self._memobj = bitwise.parse(
-            #    MEM_FORMAT, self._mmap)
-
-    # Do a download of the radio from the serial port
+        self.fix()
+    
     def sync_in(self):
-        pass
+        """Download from the radio."""
+        try:
+            tmpfile = tempfile.NamedTemporaryFile(delete=False)
+            dfu = init_dfu()
+            upload_codeplug(dfu, tmpfile.name ) 
+            data = tmpfile.read()
+            tmpfile.close()
+            os.unlink( tmpfile.name )
+            self._mmap = memmap.MemoryMap(data)
+        except errors.RadioError:
+            raise
+        except Exception, e:
+            raise errors.RadioError("Failed to communicate with radio: %s" % e)
+        # if(len(self._mmap)==self._memsize):
+            # self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
+        # else:
+            # raise errors.RadioError("Incorrect 'Model' selected.")
+        self.process_mmap()
 
-    #         try:
-    #             self._mmap = do_download(self)
-    #         except errors.RadioError:
-    #             raise
-    #         except Exception, e:
-    #             raise errors.RadioError("Failed to communicate with radio: %s" % e)
-    #         #hexdump(self._mmap);
-
-    #         if(len(self._mmap)==self._memsize):
-    #             self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
-    #         else:
-    #             raise errors.RadioError("Incorrect 'Model' selected.")
-    # Do an upload of the radio to the serial port
+    # Do an upload of the radio
     def sync_out(self):
-        # do_upload(self)
-        pass
+        """Upload to the radio."""
+        self.unfix()
+        data = self.get_mmap()
+        dfu = init_dfu()
+        download_codeplug(dfu, data) 
 
     # Return a raw representation of the memory object, which
     # is very helpful for development
     def get_raw_memory(self, number):
-        return repr(self._memobj.memory[number - 1])
+        return repr(self._memobj.memory[number-1])
 
     # Extract a high-level memory object from the low-level memory map
     # This is called to populate a memory in the UI
     def get_memory(self, number):
         # Get a low-level memory object mapped to the image
-        _mem = self._memobj.memory[number - 1]
-
+        _mem = self._memobj.memory[number-1]
+        
         # Create a high-level memory object to return to the UI
-        mem = chirp_common.Memory()
+        mem = chirp_common.DMRMemory()
 
-        mem.number = number
+        mem.number = number;
         mem.name = utftoasc(str(_mem.name)).rstrip()  # Set the alpha tag
-        mem.freq = int(_mem.rxfreq) * 10
-
-        ctone = int(_mem.ctone) / 10.0
-        rtone = int(_mem.rtone) / 10.0
+        mem.freq = int(_mem.rxfreq)*10;
+        
+        ctone=int(_mem.ctone)/10.0;
+        rtone=int(_mem.rtone)/10.0;
 
         # Anything with an unset frequency is unused.
         # Maybe we should be looking at the mode instead?
-        if mem.freq > 500e6:
-            mem.freq = 400e6
+        if mem.freq >500e6:
+            mem.freq=400e6;
+            mem.empty = True;
+            mem.name="Empty";
+            mem.mode="NFM";
+            mem.duplex=""
+            mem.offset=mem.freq;
+            _mem.mode=0x61; #Narrow FM.
+        
+        if ctone==1666.5 and rtone!=1666.5:
+            mem.rtone=rtone;
+            #mem.ctone=rtone;  #Just one tone here, because the radio can't store a second.
+            mem.tmode="Tone";
+        elif ctone!=1666.5 and rtone!=1666.5:
+            mem.ctone=ctone;
+            mem.rtone=rtone;
+            mem.tmode="TSQL";
+        else:
+            mem.tmode="";
+
+        mem.offset = int(_mem.txfreq)*10; #In split mode, offset is the TX freq.
+        if mem.offset==mem.freq:
+            mem.duplex=""; #Same freq.
+            mem.offset=0;
+        elif mem.offset==mem.freq+5e6:
+            mem.duplex="+";
+            mem.offset=5e6;
+        elif mem.offset==mem.freq-5e6:
+            mem.duplex="-";
+            mem.offset=5e6;
+        elif mem.offset==mem.freq+6e5:
+            mem.duplex="+";
+            mem.offset=6e5;
+        elif mem.offset==mem.freq-6e5:
+            mem.duplex="-";
+            mem.offset=6e5;
+        else:
+            mem.duplex="split";
+        
+        mem.mode="DMR";
+        rmode= _mem.mode & 0x0F;
+        if rmode==0x02:
+            mem.mode="DMR";
+        elif rmode==0x01:
+            mem.mode="NFM";
+        elif rmode==0x09:
+            mem.mode="FM";
+        else:
+            print "WARNING: Mode bytes 0x%02 isn't understood for %s." % (
+                _mem.mode, mem.name);
+
+        if mem.mode == "DMR":
+            slot = _mem.slot
+            color = slot >> 4
+            rxonly = slot & 0x2
+            slot = (slot & 12) >> 2
+            mem.timeslot = slot
+            mem.colorcode = color
+
+        mem.txgroup = _mem.contact
+        mem.rxgroup = _mem.grouplist
+        if mem.name in ["Empty",'']:
             mem.empty = True
-            mem.name = "Empty"
-            mem.mode = "NFM"
-            mem.duplex = ""
-            mem.offset = mem.freq
-            _mem.mode = 0x61  # Narrow FM.
 
-        # print("Tones for %s are %s and %s" % (
-        #     mem.name, rtone, ctone))
-        # mem.rtone=91.5
-        # mem.ctone=97.4 #88.5
-        if ctone == 1666.5 and rtone != 1666.5:
-            mem.rtone = rtone
-            # mem.ctone=rtone;  #Just one tone here, because the radio can't store a second.
-            mem.tmode = "Tone"
-        elif ctone != 1666.5 and rtone != 1666.5:
-            mem.ctone = ctone
-            mem.rtone = rtone
-            mem.tmode = "TSQL"
-        else:
-            mem.tmode = ""
-
-        mem.offset = int(_mem.txfreq) * 10  # In split mode, offset is the TX freq.
-        if mem.offset == mem.freq:
-            mem.duplex = ""  # Same freq.
-            mem.offset = 0
-        elif mem.offset == mem.freq + 5e6:
-            mem.duplex = "+"
-            mem.offset = 5e6
-        elif mem.offset == mem.freq - 5e6:
-            mem.duplex = "-"
-            mem.offset = 5e6
-        elif mem.offset == mem.freq + 6e5:
-            mem.duplex = "+"
-            mem.offset = 6e5
-        elif mem.offset == mem.freq - 6e5:
-            mem.duplex = "-"
-            mem.offset = 6e5
-        else:
-            mem.duplex = "split"
-
-        mem.mode = "DIG"
-        rmode = _mem.mode & 0x0F
-        if rmode == 0x02:
-            mem.mode = "DIG"
-        elif rmode == 0x01:
-            mem.mode = "NFM"
-        elif rmode == 0x09:
-            mem.mode = "FM"
-        else:
-            print("WARNING: Mode bytes 0x%02 isn't understood for %s." % (_mem.mode, mem.name))
         return mem
 
     # Store details about a high-level memory to the memory map
     # This is called when a user edits a memory in the UI
     def set_memory(self, mem):
+        try:
+            mem.resolve( self )
+        except AttributeError as e:
+            pass #print("non-dmr memory",e)
         # Get a low-level memory object mapped to the image
-        _mem = self._memobj.memory[mem.number - 1]
+        _mem = self._memobj.memory[mem.number-1]
 
         # Convert to low-level frequency representation
-        _mem.rxfreq = mem.freq / 10
-
+        _mem.rxfreq = mem.freq/10;
+        # print("set_memory rxfreq: %d freq: %d"%( _mem.rxfreq, mem.freq))
+        
         # Janky offset support.
         # TODO Emulate modes other than split.
-        if mem.duplex == "split":
-            _mem.txfreq = mem.offset / 10
-        elif mem.duplex == "+":
-            _mem.txfreq = mem.freq / 10 + mem.offset / 10
-        elif mem.duplex == "-":
-            _mem.txfreq = mem.freq / 10 - mem.offset / 10
+        if mem.duplex=="split":
+            _mem.txfreq = mem.offset/10;
+        elif mem.duplex=="+":
+            _mem.txfreq = mem.freq/10+mem.offset/10;
+        elif mem.duplex=="-":
+            _mem.txfreq = mem.freq/10-mem.offset/10;
         else:
-            _mem.txfreq = _mem.rxfreq
-        _mem.name = asctoutf(mem.name, 32)
-
-        # print("Tones in mode %s of %s and %s for %s" % (
-        #     mem.tmode, mem.ctone, mem.rtone, mem.name))
+            _mem.txfreq = _mem.rxfreq;
+        _mem.name = asctoutf(mem.name,32);
+        
+        if mem.power == "LOW":
+            #this does not yet account for vox, but it fixes where vox may appear because power was not set to a 'clean' value
+            # during programming
+            _mem.power = "\x04"
+        else: #HIGH by default
+            _mem.power = "\x24"
+        #print "Tones in mode %s of %s and %s for %s" % (
+        #    mem.tmode, mem.ctone, mem.rtone, mem.name);
         # These need to be 16665 when unused.
-        _mem.ctone = mem.ctone * 10
-        _mem.rtone = mem.rtone * 10
-
-        if mem.tmode == "Tone":
-            blankbcd(_mem.ctone)  # No receiving tone.
-        elif mem.tmode == "TSQL":
-            pass
+        _mem.ctone=mem.ctone*10;
+        _mem.rtone=mem.rtone*10;
+        
+        if mem.tmode=="Tone":
+            blankbcd(_mem.ctone); #No receiving tone.
+        elif mem.tmode=="TSQL":
+            pass;
         else:
-            blankbcd(_mem.ctone)
-            blankbcd(_mem.rtone)
-
-        if mem.mode == "FM":
-            _mem.mode = 0x69
-        elif mem.mode == "NFM":
-            _mem.mode = 0x61
-        elif mem.mode == "DIG":
-            _mem.mode = 0x62
+            blankbcd(_mem.ctone);
+            blankbcd(_mem.rtone);
+        
+        if mem.mode=="FM":
+            _mem.mode=0x69;
+        elif mem.mode=="NFM":
+            _mem.mode=0x61;
+        elif mem.mode=="DMR":
+            _mem.mode=0x62;
         else:
-            _mem.mode = 0x69
+            _mem.mode=0x69;
+        
+        if _mem.slot==0xff:
+            _mem.slot=0x14;
 
-        if _mem.slot == 0xff:
-            _mem.slot = 0x14  # TODO Make this 0x18 for S2.
+        if mem.mode == "DMR":
+            _mem.slot = mem.colorcode << 4 | mem.timeslot << 2 | 1 #the 1 is to always enable talkaround
+            _mem.contact = mem.txgroup
+            _mem.grouplist = mem.rxgroup
+            print("Setting mem %s txgroup to contact idx %s slot= %x"%(str(mem.number), str(mem.txgroup), _mem.slot))
+
+        if mem.empty:
+            _mem.mode = 0xff
+            _mem.slot = 0xff
+            _mem.contact = 0xffff
+            _mem.txfreq = 166666665
+            _mem.rxfreq = 166666665
+            pass #how does radio determine if a channel is empty?
+
+            
+
+    def set_bootlines(self,line1,line2):
+        self._memobj.general.line1 = asctoutf( line1.ljust(10) )
+        self._memobj.general.line2 = asctoutf( line2.ljust(10) )
 
     def get_settings(self):
         _general = self._memobj.general
         _info = self._memobj.info
-
+        
         basic = RadioSettingGroup("basic", "Basic")
         info = RadioSettingGroup("info", "Model Info")
-        general = RadioSettingGroup("general", "General Settings")
-
-        # top = RadioSettings(identity, basic)
+        general = RadioSettingGroup("general", "General Settings");
+        
+        
+        #top = RadioSettings(identity, basic)
         top = RadioSettings(general)
         general.append(RadioSetting(
-            "dmrid", "DMR Radio ID",
-            RadioSettingValueInteger(0, 100000000, _general.dmrid)))
+                "dmrid", "DMR Radio ID",
+                RadioSettingValueInteger(0, 100000000, _general.dmrid)));
         general.append(RadioSetting(
-            "line1", "Startup Line 1",
-            RadioSettingValueString(0, 10, utftoasc(str(_general.line1)))))
+                "line1", "Startup Line 1",
+                RadioSettingValueString(0, 10, utftoasc(str(_general.line1)))));
         general.append(RadioSetting(
-            "line2", "Startup Line 2",
-            RadioSettingValueString(0, 10, utftoasc(str(_general.line2)))))
+                "line2", "Startup Line 2",
+                RadioSettingValueString(0, 10, utftoasc(str(_general.line2)))));
         return top
 
     def set_settings(self, settings):
@@ -643,20 +861,21 @@ class MD380Radio(chirp_common.CloneModeRadio):
                 continue
             try:
                 setting = element.get_name()
-                # oldval = getattr(_settings, setting)
+                #oldval = getattr(_settings, setting)
                 newval = element.value
-
-                # LOG.debug("Setting %s(%s) <= %s" % (setting, oldval, newval))
-                if setting == "line1":
-                    _general.line1 = asctoutf(str(newval), 20)
-                elif setting == "line2":
-                    _general.line2 = asctoutf(str(newval), 20)
+                
+                #LOG.debug("Setting %s(%s) <= %s" % (setting, oldval, newval))
+                if setting=="line1":
+                    _general.line1=asctoutf(str(newval),20);
+                elif setting=="line2":
+                    _general.line2=asctoutf(str(newval),20);
                 else:
                     print("Setting %s <= %s" % (setting, newval))
                     setattr(_general, setting, newval)
-            except Exception as e:
+            except Exception, e:
                 LOG.debug(element.get_name())
                 raise
 
     def get_bank_model(self):
         return MD380BankModel(self)
+

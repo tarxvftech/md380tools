@@ -20,7 +20,7 @@ md380tools@googlegroups.com. So feel free to put in your questions into it!
 
 A few of us are also on the #md380 IRC channel on Freenode.
 
-A helpful site is available at http://md380.tools/
+A helpful site is available at http://md380.org/
 
 There are also some related groups you may find interesting:
 - https://www.facebook.com/groups/KD4ZToolkit/
@@ -66,6 +66,8 @@ Both types of vocoder (old and new vocoder radios) are supported.
 
 The DMR MARC user's database required a 16 MByte SPI Flash memory chip.
 In some VHF Radios is only an 1 MByte SPI Flash installed.
+
+Dual band radios such as the MD2017 and MD-UV380 series are not supported.
 
 ## Known models ##
 

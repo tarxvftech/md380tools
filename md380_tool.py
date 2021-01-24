@@ -112,12 +112,12 @@ class Tool(DFU):
                   chr(0) +    # x1 (x1,y1) = tile's upper left corner
                   chr(y) +    # y1
                   chr(159) +  # x2 (x2,y2) = tile's lower right corner
-                  chr(y)      # y2 
+                  chr(y)      # y2
                   )
            self._device.ctrl_transfer(0x21, Request.DNLOAD, 1, 0, cmdstr)
            self.get_status()  # this changes state
            status = self.get_status()  # this gets the status
-           # read 5-byte header (echo of cmdstr) followed by 
+           # read 5-byte header (echo of cmdstr) followed by
            # 160 pixels per line * 3 bytes per pixel (BLUE,GREEN,RED):
            rd_result = self.upload(1, 160*3+5, 0);
            if rd_result[4] == y:  # y2 ok -> got the expected response
@@ -281,6 +281,15 @@ class Tool(DFU):
         # time.sleep(0.1);
         status = self.get_status()  # this gets the status
 
+    def reboot_to_bootloader(self):
+        """Reboot into the bootloader with a DFU command.
+        This will erase (part of) the firmware from flash,
+        so you must reprogram the firmware afterwards if you'd like a working radio.
+        """
+        cmd = 0x86  # reboot_to_bootloader
+        self._device.ctrl_transfer(0x21, Request.DNLOAD, 1, 0, chr(cmd))
+        self.get_status()  # this changes state
+
     def getdmesg(self):
         """Returns the 1024 byte DMESG buffer."""
         cmd = 0x00  # DMESG
@@ -395,7 +404,6 @@ def dmesg(dfu):
     # dfu.drawtext("Dumping dmesg",160,50);
     print(dfu.getdmesg())
 
-
 def parse_calibration(dfu):
     dfu.md380_custom(0xA2, 0x05)
     data = str(bytearray(dfu.upload(0, 512)))
@@ -419,8 +427,8 @@ def screenshot(dfu, filename="screenshot.bmp"):
     with open(filename, 'wb') as f:
       # Write a simple, hard-coded bitmap file header
       #  (14 byte "file header" + 40 byte "info block" + 3*160*128 byte "data",
-      #   total size = 0x0000F036 bytes. Here written in little endian format: 
-      f.write( "BM" + chr(0x36)+chr(0xF0)+chr(0x00)+chr(0x00) 
+      #   total size = 0x0000F036 bytes. Here written in little endian format:
+      f.write( "BM" + chr(0x36)+chr(0xF0)+chr(0x00)+chr(0x00)
                     + chr(0x00)+chr(0x00)+chr(0x00)+chr(0x00)
                     + chr( 54 )+chr(0x00)+chr(0x00)+chr(0x00) )
       # Next: Write the "bitmap info header". Keep it simple, use 40 bytes.
@@ -438,7 +446,7 @@ def screenshot(dfu, filename="screenshot.bmp"):
       # Write image data with 160 pixels per line, 3 bytes per pixel.
       # For a start, just dump the pixels to the file unmodified.
       y = 127; # bmp files begin with the 'bottom line' (y=127)
-      while y>=0:  
+      while y>=0:
         buf = dfu.read_framebuf_line(y)
         f.write(buf)
         y = y-1;
@@ -783,8 +791,10 @@ Dump one word.
     md380-tool readword <0xcafebabe>
 Dump 1kB from arbitrary address
     md380-tool dump <filename.bin> <address>
-Dump calibration data 
+Dump calibration data
     md380-tool calibration
+Reboot into the bootloader (erases application, you _must_ reflash firmware afterwards):
+    md380-tool reboot_to_bootloader
 
 Copy File to SPI flash.
     md380-tool spiflashwrite <filename> <address>"
@@ -818,6 +828,13 @@ def main():
             #             elif sys.argv[1] == 'channel':
             #                 dfu=init_dfu();
             #                 getchannel(dfu);
+            elif sys.argv[1] == "reboot_to_bootloader":
+                dfu = init_dfu()
+                print("It's okay to get a pipe error here, "
+                "as long as it reboots into bootloader and "
+                "has the red/green alternating LED.")
+                dfu.reboot_to_bootloader()
+                print("Now go reflash your firmware!")
             elif sys.argv[1] == 'c5000':
                 dfu = init_dfu()
                 c5000(dfu)
@@ -845,6 +862,8 @@ def main():
             elif sys.argv[1] == 'screenshot':
                 dfu = init_dfu()
                 screenshot(dfu)
+            else:
+                usage()
 
         elif len(sys.argv) == 3:
             if sys.argv[1] == 'flashdump':
@@ -883,6 +902,8 @@ def main():
             elif sys.argv[1] == 'screenshot':
                 dfu = init_dfu()
                 screenshot(dfu, sys.argv[2])
+            else:
+                usage()
 
         elif len(sys.argv) == 4:
             if sys.argv[1] == 'spiflashwrite':
@@ -893,16 +914,23 @@ def main():
                     spiflashwrite(dfu, sys.argv[2], adr)
                 else:
                     print("address too low")
-            if sys.argv[1] == 'dump':
+            elif sys.argv[1] == 'dump':
                 print("Dumping memory from %s." % sys.argv[3])
                 dfu = init_dfu()
                 dump(dfu, sys.argv[2], sys.argv[3])
+            else:
+                usage()
 
         else:
             usage()
 
     except RuntimeError as e:
         print(e.args[0])
+        exit(1)
+    except usb.core.USBError as ue:
+        print(ue)
+        if ue[0] == 32:
+            print('Make sure the device is already flashed with custom firmware and NOT in DFU mode')
         exit(1)
     except Exception as e:
         print(e)

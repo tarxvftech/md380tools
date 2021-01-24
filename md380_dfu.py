@@ -19,7 +19,9 @@ import time
 import usb.core
 
 import dfu_suffix
-from DFU import DFU, State
+from DFU import DFU, State, Status
+import md380_tool
+import stm32_dfu
 
 # The tricky thing is that *THREE* different applications all show up
 # as this same VID/PID pair.
@@ -277,8 +279,10 @@ radio will be radio to accept this firmware update.""")
             # if dfu.verbose: sys.stdout.write('_\n'); sys.stdout.flush()
             address_idx += 1
         print("100% complete, now safe to disconnect and/or reboot radio")
+        return True
     except Exception as e:
         print(e)
+        return False
 
 
 def upload(dfu, flash_address, length, path):
@@ -340,7 +344,7 @@ def init_dfu(alt=0):
         raise RuntimeError('Device not found')
 
     dfu = DFU(dev, alt)
-    dev.default_timeout = 3000
+    dev.default_timeout = 6000
 
     try:
         dfu.enter_dfu_mode()
@@ -352,6 +356,77 @@ def init_dfu(alt=0):
 
     return dfu
 
+def auto_upgrade(firmware_data):
+    print("Beginning firmware auto_upgrade. This supports forcing a fully-booted radio into the bootloader, if it has a recent experimental firmware.\n"
+    "Stock firmware and older experimental firmware will still require the usual buttons (PTT+button above) held during power-on.\n"
+    )
+    errors = []
+    dfu = init_dfu()
+    mfg = dfu.get_string(1)
+    if mfg != u'AnyRoad Technology':
+        print("Radio not in bootloader: attempting automatic reboot into bootloader")
+        try:
+            dfu.wait_till_ready() #make sure it's safe to reboot radio
+            del dfu
+        except usb.core.USBError as e:
+            #we expect a pipe error here (errno 32)
+            #or an input/output error (errno 5)
+            # print("detach dfu")
+            if e.errno not in [5,32]:
+                print(e)
+                errors.append(e)
+        time.sleep(1)
+        try:
+            tooldfu = md380_tool.init_dfu() #prepare to and then reboot radio
+            tooldfu.reboot_to_bootloader()
+            del tooldfu
+        except usb.core.USBError as e:
+            #we expect a pipe error here (errno 32)
+            #or an input/output error (errno 5)
+            print("tooldfu")
+            if e.errno not in  [5,32]: 
+                print(e)
+                errors.append(e)
+        print("Waiting 10 seconds for bootloader")
+        time.sleep(10) #wait for bootloader to be ready
+        status = None
+        while status != Status.OK: #stay here until bootloader actually ready
+            print("Checking bootloader is okay:")
+            try:
+                dfu = init_dfu()
+                status = dfu.get_status()[0]
+            except usb.core.USBError as e:
+                #busy device is okay here, but the time.sleep should be enough to handle that
+                print(e)
+                status = None
+            time.sleep(.5)
+    else:
+        print("Radio is already in bootloader, or we can't tell (old firmware versions can do this sometimes)")
+        print("If this fails, boot the radio into the bootloader yourself (You've succeeded when the status light flashes between red and green) and try again")
+    result = download_firmware(dfu, firmware_data)
+    if result is True:
+        errors = []
+    dfu.wait_till_ready()
+
+    #now we boot the full application
+    try:
+        del dfu
+    except usb.core.USBError as e:
+        if e.errno not in [5,32]: 
+            print("detach bootloader dfu")
+            print(e)
+            errors.append(e)
+    time.sleep(1)
+    try:
+        stm32dfu = stm32_dfu.init_dfu()
+        stm32dfu.go() #has a default address that works
+        del stm32dfu
+    except usb.core.USBError as e:
+        if e.errno not in [5,32]: 
+            print("stm32dfu go")
+            print(e)
+            errors.append(e)
+    return errors
 
 def usage():
     print("""
@@ -391,46 +466,59 @@ Upgrade to new firmware:
 """)
 
 
+
 def main():
     try:
         if len(sys.argv) == 3:
             if sys.argv[1] == 'read':
-                import usb.core
                 dfu = init_dfu()
                 upload_codeplug(dfu, sys.argv[2])
                 print('Read complete')
             elif sys.argv[1] == 'readboot':
                 print("This only works from OS X.  Use the one in md380-tool with patched firmware for other bootloaders.")
-                import usb.core
                 dfu = init_dfu()
                 upload_bootloader(dfu, sys.argv[2])
 
             elif sys.argv[1] == "upgrade":
-                import usb.core
+                dfu = init_dfu()
                 with open(sys.argv[2], 'rb') as f:
                     data = f.read()
-                    dfu = init_dfu()
-                    download_firmware(dfu, data)
+                    result = download_firmware(dfu, data)
+
+            elif sys.argv[1] == "auto-upgrade":
+                with open(sys.argv[2], 'rb') as f:
+                    data = f.read()
+                    errors = auto_upgrade(data)
+                    if errors:
+                        print("Encountered following unexpected errors during upgrade:")
+                        for e in errors:
+                            print(e)
+                        print("This means the upgrade (probably) failed. Try again.")
 
             elif sys.argv[1] == 'write':
-                import usb.core
                 f = open(sys.argv[2], 'rb')
                 data = f.read()
                 f.close()
+
+                firmware = None
 
                 if sys.argv[2][-4:] == '.dfu':
                     suf_len, vendor, product = dfu_suffix.check_suffix(data)
                     dfu = init_dfu()
                     firmware = data[:-suf_len]
-                elif sys.argv[2][-4:] == '.rdt' and len(data) == 262709 and data[0:5] == 'DfuSe':
-                    dfu = init_dfu()
-                    firmware = data[549:len(data) - 16]
+                elif sys.argv[2][-4:] == '.rdt':
+                    if len(data) == 262709 and data[0:5] == 'DfuSe':
+                        dfu = init_dfu()
+                        firmware = data[549:len(data) - 16]
+                    else:
+                        print('%s not a valid codeplug (wrong size, or wrong magic).' % sys.argv[2])
                 else:
                     dfu = init_dfu()
                     firmware = data
 
-                download_codeplug(dfu, firmware)
-                print('Write complete')
+                if firmware is not None:
+                    download_codeplug(dfu, firmware)
+                    print('Write complete')
 
             elif sys.argv[1] == 'sign':
                 filename = sys.argv[2]
@@ -448,7 +536,6 @@ def main():
                 print("Signed file written: %s" % dfu_file)
 
             elif sys.argv[1] == 'settime':
-                import usb.core
                 dfu = init_dfu()
                 dfu.set_time()
             else:
@@ -456,20 +543,16 @@ def main():
 
         elif len(sys.argv) == 2:
             if sys.argv[1] == 'detach':
-                import usb.core
                 dfu = init_dfu()
                 dfu.set_address(0x08000000)  # Radio Application
                 detach(dfu)
             elif sys.argv[1] == 'time':
-                import usb.core
                 dfu = init_dfu()
                 print(dfu.get_time())
             elif sys.argv[1] == 'settime':
-                import usb.core
                 dfu = init_dfu()
                 dfu.set_time()
             elif sys.argv[1] == 'reboot':
-                import usb.core
                 dfu = init_dfu()
                 dfu.md380_custom(0x91, 0x01)  # Programming Mode
                 dfu.md380_custom(0x91, 0x01)  # Programming Mode
@@ -477,7 +560,6 @@ def main():
                 # dfu.drawtext("Rebooting",160,50);
                 dfu.md380_reboot()
             elif sys.argv[1] == 'abort':
-                import usb.core
                 dfu = init_dfu()
                 dfu.abort()
             else:

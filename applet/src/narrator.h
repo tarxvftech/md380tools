@@ -4,6 +4,9 @@
 //  Contains defines, variables, and prototypes for the 'narrator'
 //  for visually impaired hams. Details and implementation in narrator.c .
 
+#ifndef NARRATOR_H
+#define NARRATOR_H
+
 #ifndef  CONFIG_DIMMED_LIGHT   // want 'dimmable backlight' ?
 # define CONFIG_DIMMED_LIGHT 0 // guess not (else set CONFIG_DIMMED_LIGHT=1 in config.h)
 #endif
@@ -91,3 +94,5 @@ void narrator_repeat(void); // callable per sidekey: repeat last sentence or mes
 
 
 #endif // CONFIG_MORSE_OUTPUT ?
+
+#endif

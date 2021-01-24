@@ -6,3 +6,5 @@ I had been using the MD390 V1.36 CPS without any problems to read/write to my MD
 Now using CPS MD380 V1.32 and everything works as it should...although the Zone Toggle is quite a nice feature.
 
 https://groups.google.com/d/msg/md380tools/yQpODNMmdgY/14JrKTCcBgAJ
+
+The CPS may sometimes be garbled (or in chinese) in Windows. Edit the program's settings.ini language setting to say english and that should fix the issue.
