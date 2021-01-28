@@ -79,34 +79,36 @@ def unused_download(dfu, data, flash_address):
 
 def download(dfu,location,size,data):
     print("make_download(location=%08x, size=%d, len(data)=%dk)"%(location,size,len(data)/1024))
-    write_size = 1024
-    full_write = 128
-    half_write = 64
-    full_write_size = 128*write_size
-    half_write_size = 64*write_size
-
-    x=location & (full_write_size -1)
-    if 0 < x < half_write_size:
-        y= half_write_size - x
-        number_of_possible_writes = y/write_size
-    elif 0 <= x < full_write_size:
-        y= full_write_size - x
-        number_of_possible_writes = y/write_size
-    number_of_writes_left = size/write_size
-    if number_of_writes_left > number_of_possible_writes:
-        number_of_writes_this_pass = number_of_possible_writes
+    block_size = 1024
+    if location < 0x8000000: #not exactly correct I think? but covers the other parts
+        sector_size = 0x10000
+    elif location in [0x8000000, 0x8004000, 0x8008000, 0x800c000]:
+        sector_size = 0x4000
+    elif location in [0x8010000]:
+        sector_size = 0x10000
     else:
-        number_of_writes_this_pass = number_of_writes_left
-    print("write %dk"%(number_of_writes_this_pass))
+        sector_size = 0x20000 
+    mask = sector_size - 1;
+    alignment = location & mask;
+    possible_bytes = sector_size - (alignment)
+    possible_blocks = possible_bytes/block_size
+    left = size/block_size #number of blocks left to write overall
+    numblocks = min(possible_blocks,left)
+
+    print("erase 0x%x"%(location))
+    dfu.erase_block(location,True)
+
+    print("write %dk"%(numblocks))
     dfu.set_address(location)
     written = 0
-    for i in range(number_of_writes_this_pass):
+    for i in range(numblocks):
         block_num = i+2
-        packet = data[written:written+write_size]
+        print("download(%d)"%(block_num))
+        packet = data[written:written+block_size]
         # print("dfu.download, block_num=%02x len(packet)=%d"%(block_num,len(packet)))
         dfu.download(block_num, packet)
         dfu.wait_till_ready()
-        written += write_size
+        written += block_size
     print("after ==  %08x"%(location+written))
     left_to_write_here = size-written
     new_location = location+written
@@ -486,10 +488,12 @@ def download_firmware_md2017(dfu, data):
         dfu.md380_custom(0x91, 0x01)
         dfu.md380_custom(0x91, 0x31)
 
-        dfu.erase_blocks(addresses)
+        # dfu.erase_blocks(addresses)
 
         header, data, footer = breakout_header_and_footer_if_present(data)
+        print(header, len(data), footer)
         header_dict = parse_firmware_header( header )
+        print(header_dict)
         print("Writing firmware:")
         for location,size in header_dict["firmware_locations_and_lengths"]:
             print("0x%08x : len = 0x%x bytes, %dk"%(location,size,size/1024))
